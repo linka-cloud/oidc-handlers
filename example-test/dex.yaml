@@ -1,0 +1,61 @@
+issuer: http://localhost:5556
+expiry:
+  idTokens: "5s"
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: ldap-aggregator
+storage:
+  type: sqlite3
+  config:
+    file: ':memory:'
+web:
+  http: 0.0.0.0:5556
+frontend:
+  theme: partitio
+  issuer: Partitio
+#connectors:
+#- type: ldap-aggregator
+#  name: Active Directories
+#  id: ldap-aggregator
+#  config:
+#    passPhrase: shouldBeSecure!
+#    sqlite: /var/lib/dex/ldap-aggregator.db
+#    servers:
+#    - host: ad:636
+#      insecureNoSSL: false
+#      insecureSkipVerify: true
+#      bindDN: cn=administrator,cn=users,dc=example,dc=com
+#      bindPW: "Passw1rd!"
+#      usernamePrompt: Username
+#      # Will be set from last one dc in BindDN if not set
+#      organization: partitio
+#      userSearch:
+#        baseDN: cn=users,dc=example,dc=com
+#        filter: "(objectClass=person)"
+#        username: samAccountName
+#        idAttr: DN
+#        emailAttr: mail
+#        nameAttr: cn
+#        scope: sub
+#      groupSearch:
+#        baseDN: dc=example,dc=com
+#        filter: "(objectClass=group)"
+#        userAttr: DN
+#        groupAttr: member
+#        nameAttr: cn
+#        scope: sub
+staticClients:
+- id: oidc
+  redirectURIs:
+  - 'http://example.localhost:8888/auth/callback'
+  name: 'OIDC Handlers'
+  secret: 0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44
+
+
+enablePasswordDB: true
+staticPasswords:
+- email: "admin@example.com"
+  # bcrypt hash of the string "password"
+  hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+  username: "admin"
+  userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
