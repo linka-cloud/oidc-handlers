@@ -42,7 +42,7 @@ func main() {
 	http.HandleFunc("/auth", oidc.RedirectHandler)
 	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if err := oidc.Refresh(w, r); err != nil {
+		if _, err := oidc.Refresh(w, r); err != nil {
 			logrus.Error(err)
 			oidc.SetRedirectCookie(w, "/")
 			http.Redirect(w, r, "/auth", http.StatusSeeOther)
@@ -60,8 +60,9 @@ func main() {
 	}
 }
 
+
 ```
 
-Application is available at [http://example.localhost:8888]
+Application is available at http://example.localhost:8888
 **Email**: admin@example.com
 **Password**: password

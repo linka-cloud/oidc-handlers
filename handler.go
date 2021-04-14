@@ -19,7 +19,7 @@ type Handler interface {
 	RedirectHandler(w http.ResponseWriter, r *http.Request)
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
 	Callback(w http.ResponseWriter, r *http.Request) error
-	Refresh(w http.ResponseWriter, r *http.Request) error
+	Refresh(w http.ResponseWriter, r *http.Request) (idToken string, err error)
 	SetRedirectCookie(w http.ResponseWriter, path string)
 	CleanCookies(w http.ResponseWriter)
 }
@@ -134,18 +134,18 @@ func (h *handler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) error {
+func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) (string, error) {
 	h.ensureCookieDomain(r)
 	idCookie, err := r.Cookie(h.cookieConfig.IDTokenName)
 	if err != nil {
 		h.CleanCookies(w)
-		return fmt.Errorf("oidc cookie: %w", err)
+		return "", fmt.Errorf("oidc cookie: %w", err)
 	}
 	idToken, err := h.verifier.Verify(r.Context(), idCookie.Value)
 	if err != nil {
 		h.log.WithError(err).Error("verify token")
 		h.CleanCookies(w)
-		return err
+		return "", err
 	}
 	log := h.log.WithField("hash", idToken.AccessTokenHash)
 	key := idToken.AccessTokenHash
@@ -156,7 +156,7 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) error {
 		}
 		log.Infof("skipping refresh (expiry: %v)", idToken.Expiry)
 		*r = *r.WithContext(setClaims(r.Context(), idToken))
-		return nil
+		return "", nil
 	}
 	h.m.Store(key, struct{}{})
 	log.Infof("setting refreshing marker")
@@ -168,22 +168,22 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		h.CleanCookies(w)
 		log.WithError(err).Error("refresh cookie")
-		return fmt.Errorf("refresh cookie: %w", err)
+		return "", fmt.Errorf("refresh cookie: %w", err)
 	}
 	tk := h.oauth.TokenSource(r.Context(), &oauth2.Token{RefreshToken: refreshCookie.Value, Expiry: idToken.Expiry})
 	oauth2Token, err := tk.Token()
 	if err != nil {
 		log.WithError(err).Error("refresh token")
-		return err
+		return "", err
 	}
 	idToken, err = h.handleOauthToken(r.Context(), w, oauth2Token)
 	if err != nil {
 		log.WithError(err).Error("handle token")
-		return err
+		return "", err
 	}
 	log.Info("token refreshed")
 	*r = *r.WithContext(setClaims(r.Context(), idToken))
-	return nil
+	return oauth2Token.Extra("id_token").(string), nil
 }
 
 func (h *handler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, error) {

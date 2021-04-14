@@ -2,7 +2,7 @@ version: '3'
 
 services:
   dex:
-    image: partitio/dex
+    image: partitio/dex:refresh-token-expiration-policy
     restart: always
     command:
     - dex
@@ -17,3 +17,4 @@ services:
     - 5556:5556
     volumes:
     - ./example-test/dex.yaml:/etc/dex/config.yaml
+
