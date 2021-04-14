@@ -7,7 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	oidc_handlers "gitlab.bertha.cloud/partitio/lab/oidc-hanlers"
+	oidc_handlers "gitlab.bertha.cloud/partitio/lab/oidc-handlers"
 )
 
 func main() {

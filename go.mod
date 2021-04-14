@@ -1,4 +1,4 @@
-module gitlab.bertha.cloud/partitio/lab/oidc-hanlers
+module gitlab.bertha.cloud/partitio/lab/oidc-handlers
 
 go 1.16
 
