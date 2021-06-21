@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-type claimsCtx struct {}
+type claimsCtx struct{}
 
 func contextWithClaims(ctx context.Context, claims Claims) context.Context {
 	return context.WithValue(ctx, claimsCtx{}, claims)

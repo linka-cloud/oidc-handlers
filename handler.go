@@ -84,9 +84,8 @@ type handler struct {
 	verifier *oidc.IDTokenVerifier
 	log      logrus.FieldLogger
 
-	now      func() time.Time
-	m        sync.Map
-	mu       sync.RWMutex
+	now func() time.Time
+	mu  sync.RWMutex
 }
 
 func (h *handler) SetRedirectCookie(w http.ResponseWriter, path string) {
@@ -148,22 +147,12 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) (string, error
 		return "", err
 	}
 	log := h.log.WithField("hash", idToken.AccessTokenHash)
-	key := idToken.AccessTokenHash
-	_, refreshing := h.m.Load(key)
-	if !idToken.Expiry.Before(h.now().Add(5*time.Second)) || refreshing {
-		if refreshing {
-			log.Warn("token is refreshing")
-		}
+
+	if !idToken.Expiry.Before(h.now().Add(idToken.Expiry.Sub(idToken.IssuedAt) / 2)) {
 		log.Infof("skipping refresh (expiry: %v)", idToken.Expiry)
 		*r = *r.WithContext(setClaims(r.Context(), idToken))
 		return "", nil
 	}
-	h.m.Store(key, struct{}{})
-	log.Infof("setting refreshing marker")
-	defer time.AfterFunc(time.Second, func() {
-		log.Infof("deleting refreshing marker")
-		h.m.Delete(key)
-	})
 	refreshCookie, err := r.Cookie(h.cookieConfig.RefreshTokenName)
 	if err != nil {
 		h.CleanCookies(w)

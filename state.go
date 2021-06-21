@@ -16,7 +16,7 @@ var (
 func newState() string {
 	var state string
 	for i := 0; i < 32; i++ {
-		state += string(nouns[rand.Int() % len(nouns)])
+		state += string(nouns[rand.Int()%len(nouns)])
 	}
 	return state
 }
