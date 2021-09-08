@@ -23,13 +23,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	oidc_handlers "gitlab.bertha.cloud/partitio/lab/oidc-handlers"
+	oidch "go.linka.cloud/oidc-handlers"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	config := oidc_handlers.Config{
+	config := oidch.Config{
 		IssuerURL:     "http://localhost:5556",
 		ClientID:      "oidc",
 		ClientSecret:  "0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44",
@@ -48,7 +48,7 @@ func main() {
 	}
 }
 
-func device(ctx context.Context, config oidc_handlers.Config) error {
+func device(ctx context.Context, config oidch.Config) error {
 	dh, err := config.DeviceHandler(ctx)
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func device(ctx context.Context, config oidc_handlers.Config) error {
 	return nil
 }
 
-func web(ctx context.Context, config oidc_handlers.Config) error {
+func web(ctx context.Context, config oidch.Config) error {
 	oidc, err := config.WebHandler(ctx)
 	if err != nil {
 		return err
@@ -79,7 +79,7 @@ func web(ctx context.Context, config oidc_handlers.Config) error {
 			http.Redirect(w, r, "/auth", http.StatusSeeOther)
 			return
 		}
-		c, ok := oidc_handlers.ClaimsFromContext(r.Context())
+		c, ok := oidch.ClaimsFromContext(r.Context())
 		if !ok {
 			http.Error(w, "no claims found", http.StatusInternalServerError)
 			return
