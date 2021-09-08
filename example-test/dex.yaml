@@ -19,6 +19,7 @@ staticClients:
 - id: oidc
   redirectURIs:
   - 'http://example.localhost:8888/auth/callback'
+  - '/device/callback'
   name: 'OIDC Handlers'
   secret: 0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44
 

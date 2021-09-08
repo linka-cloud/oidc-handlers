@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,7 +14,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type Handler interface {
+var (
+	_ WebHandler = (*webHandler)(nil)
+)
+
+// Deprecated: use WebHandler instead
+type Handler = WebHandler
+
+// WebHandler is the oidc handler for standard web auth flow
+type WebHandler interface {
 	RedirectHandler(w http.ResponseWriter, r *http.Request)
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
 	Callback(w http.ResponseWriter, r *http.Request) error
@@ -24,50 +31,13 @@ type Handler interface {
 	CleanCookies(w http.ResponseWriter)
 }
 
-const (
-	DefaultIDTokenName      = "id_token"
-	DefaultRefreshTokenName = "refresh_token"
-	DefaultAuthStateName    = "auth_state"
-	DefaultRedirectName     = "redirect"
-)
-
+// Deprecated: use Config.WebHandler instead
 func New(ctx context.Context, config Config) (Handler, error) {
-	if len(config.Scopes) == 0 {
-		config.Scopes = []string{oidc.ScopeOpenID, oidc.ScopeOfflineAccess, "profile", "email", "groups"}
-	}
-	if config.CookieConfig.RefreshTokenName == "" {
-		config.CookieConfig.RefreshTokenName = DefaultRefreshTokenName
-	}
-	if config.CookieConfig.IDTokenName == "" {
-		config.CookieConfig.IDTokenName = DefaultIDTokenName
-	}
-	if config.CookieConfig.AuthStateName == "" {
-		config.CookieConfig.AuthStateName = DefaultAuthStateName
-	}
-	if config.CookieConfig.RedirectName == "" {
-		config.CookieConfig.RedirectName = DefaultRedirectName
-	}
-	provider, err := oidc.NewProvider(ctx, config.IssuerURL)
+	oauth2Config, verifier, err := config.apply(ctx)
 	if err != nil {
-		return nil, err
+	    return nil, err
 	}
-
-	// Configure an OpenID Connect aware OAuth2 client.
-	oauth2Config := oauth2.Config{
-		ClientID:     config.ClientID,
-		ClientSecret: config.ClientSecret,
-		RedirectURL:  config.OauthCallback,
-		Endpoint:     provider.Endpoint(),
-		Scopes:       config.Scopes,
-	}
-	now := time.Now
-	if config.Logger == nil {
-		log := logrus.New()
-		log.SetOutput(io.Discard)
-		config.Logger = log
-	}
-	verifier := provider.Verifier(&oidc.Config{ClientID: config.ClientID, SkipExpiryCheck: true, Now: now})
-	h := &handler{
+	h := &webHandler{
 		cookieConfig: config.CookieConfig,
 		oauth:        oauth2Config,
 		verifier:     verifier,
@@ -77,7 +47,7 @@ func New(ctx context.Context, config Config) (Handler, error) {
 	return h, nil
 }
 
-type handler struct {
+type webHandler struct {
 	oauth        oauth2.Config
 	cookieConfig CookieConfig
 
@@ -88,18 +58,22 @@ type handler struct {
 	mu  sync.RWMutex
 }
 
-func (h *handler) SetRedirectCookie(w http.ResponseWriter, path string) {
+func (h *webHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
 	http.SetCookie(w, h.cookie(h.cookieConfig.RedirectName, path))
 }
 
-func (h *handler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
+func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
+	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log.Info("redirect")
 	h.ensureCookieDomain(r)
 	state := newState()
 	http.SetCookie(w, h.cookie(h.cookieConfig.AuthStateName, state))
 	http.Redirect(w, r, h.oauth.AuthCodeURL(state), http.StatusFound)
 }
 
-func (h *handler) Callback(w http.ResponseWriter, r *http.Request) error {
+func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
+	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log.Info("callback")
 	stateCookie, err := r.Cookie(h.cookieConfig.AuthStateName)
 	if err != nil {
 		h.CleanCookies(w)
@@ -127,13 +101,15 @@ func (h *handler) Callback(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (h *handler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
+func (h *webHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.Callback(w, r); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
 
-func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) (string, error) {
+func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, error) {
+	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log.Info("refresh")
 	h.ensureCookieDomain(r)
 	idCookie, err := r.Cookie(h.cookieConfig.IDTokenName)
 	if err != nil {
@@ -142,11 +118,11 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) (string, error
 	}
 	idToken, err := h.verifier.Verify(r.Context(), idCookie.Value)
 	if err != nil {
-		h.log.WithError(err).Error("verify token")
+		log.WithError(err).Error("verify token")
 		h.CleanCookies(w)
 		return "", err
 	}
-	log := h.log.WithField("hash", idToken.AccessTokenHash)
+	log = log.WithField("hash", idToken.AccessTokenHash)
 
 	if !idToken.Expiry.Before(h.now().Add(idToken.Expiry.Sub(idToken.IssuedAt) / 2)) {
 		log.Infof("skipping refresh (expiry: %v)", idToken.Expiry)
@@ -175,7 +151,7 @@ func (h *handler) Refresh(w http.ResponseWriter, r *http.Request) (string, error
 	return oauth2Token.Extra("id_token").(string), nil
 }
 
-func (h *handler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, error) {
+func (h *webHandler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, error) {
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
 		return nil, errors.New("id_token not found")
@@ -198,7 +174,7 @@ func setClaims(ctx context.Context, idToken *oidc.IDToken) context.Context {
 	return contextWithClaims(ctx, claims)
 }
 
-func (h *handler) cookie(name, value string) *http.Cookie {
+func (h *webHandler) cookie(name, value string) *http.Cookie {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return &http.Cookie{
@@ -211,7 +187,7 @@ func (h *handler) cookie(name, value string) *http.Cookie {
 	}
 }
 
-func (h *handler) deleteCookie(w http.ResponseWriter, name string) {
+func (h *webHandler) deleteCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:   name,
 		Path:   "/",
@@ -220,14 +196,14 @@ func (h *handler) deleteCookie(w http.ResponseWriter, name string) {
 	})
 }
 
-func (h *handler) CleanCookies(w http.ResponseWriter) {
+func (h *webHandler) CleanCookies(w http.ResponseWriter) {
 	h.deleteCookie(w, h.cookieConfig.IDTokenName)
 	h.deleteCookie(w, h.cookieConfig.RefreshTokenName)
 	h.deleteCookie(w, h.cookieConfig.RedirectName)
 	h.deleteCookie(w, h.cookieConfig.AuthStateName)
 }
 
-func (h *handler) ensureCookieDomain(r *http.Request) {
+func (h *webHandler) ensureCookieDomain(r *http.Request) {
 	h.mu.RLock()
 	if h.cookieConfig.Domain != "" {
 		h.mu.RUnlock()

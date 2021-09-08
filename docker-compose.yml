@@ -2,7 +2,7 @@ version: '3'
 
 services:
   dex:
-    image: partitio/dex:refresh-token-expiration-policy
+    image: partitio/dex:logout
     restart: always
     command:
     - dex

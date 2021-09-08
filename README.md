@@ -19,10 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
-	oidc_handlers "gitlab.bertha.cloud/partitio/lab/oidc-hanlers"
+	oidc_handlers "gitlab.bertha.cloud/partitio/lab/oidc-handlers"
 )
 
 func main() {
@@ -33,11 +34,41 @@ func main() {
 		ClientID:      "oidc",
 		ClientSecret:  "0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44",
 		OauthCallback: "http://example.localhost:8888/auth/callback",
-		Logger:        logrus.New(),
 	}
-	oidc, err := oidc_handlers.New(ctx, config)
-	if err != nil {
+	devCtx, cancel := context.WithTimeout(ctx, 30 * time.Second)
+	defer cancel()
+
+	// Perform single device auth flow
+	if err := device(devCtx, config); err != nil {
 		logrus.Fatal(err)
+	}
+	// Start web app
+	if err := web(ctx, config); err != nil {
+		logrus.Fatal(err)
+	}
+}
+
+func device(ctx context.Context, config oidc_handlers.Config) error {
+	dh, err := config.DeviceHandler(ctx)
+	if err != nil {
+		return err
+	}
+	v, err := dh.Exchange(ctx)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("Please visit %s to authenticate", v.URI())
+	if _, _, err := v.Verify(ctx); err != nil {
+		return err
+	}
+	logrus.Infof("Device authentication succeed")
+	return nil
+}
+
+func web(ctx context.Context, config oidc_handlers.Config) error {
+	oidc, err := config.WebHandler(ctx)
+	if err != nil {
+		return err
 	}
 	http.HandleFunc("/auth", oidc.RedirectHandler)
 	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
@@ -55,11 +86,15 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(c)
 	})
-	if err := http.ListenAndServe(":8888", nil); err != nil {
-		logrus.Fatal(err)
+	lm := func (next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logrus.WithFields(logrus.Fields{"path": r.URL.Path, "method": r.Method, "remote": r.RemoteAddr}).Info("new request")
+			next.ServeHTTP(w, r)
+		})
 	}
+	logrus.Info("Starting web server at http://example.localhost:8888")
+	return http.ListenAndServe(":8888", lm(http.DefaultServeMux))
 }
-
 
 ```
 
