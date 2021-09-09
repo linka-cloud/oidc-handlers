@@ -119,10 +119,21 @@ func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &device{
+	return &deviceHandler{
 		oauth:    oauth2Config,
 		verifier: verifier,
-		now:      now,
 		log:      c.Logger.WithField("oidc", "device"),
+	}, nil
+}
+
+func (c *Config) GRPC(ctx context.Context) (GRPCHandler, error) {
+	oauth2Config, verifier, err := c.apply(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &grpcHandler{
+		oauth:    oauth2Config,
+		verifier: verifier,
+		log:      c.Logger.WithField("oidc", "grpc"),
 	}, nil
 }
