@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/sirupsen/logrus"
@@ -29,7 +27,7 @@ import (
 )
 
 var (
-	_ DeviceHandler = (*device)(nil)
+	_ DeviceHandler = (*deviceHandler)(nil)
 )
 
 type DeviceHandler interface {
@@ -37,17 +35,14 @@ type DeviceHandler interface {
 	Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, refreshToken string, err error)
 }
 
-type device struct {
+type deviceHandler struct {
 	oauth oauth2.Config
 
 	verifier *oidc.IDTokenVerifier
 	log      logrus.FieldLogger
-
-	now func() time.Time
-	mu  sync.RWMutex
 }
 
-func (d *device) Exchange(ctx context.Context) (DeviceVerifier, error) {
+func (d *deviceHandler) Exchange(ctx context.Context) (DeviceVerifier, error) {
 	a, err := d.oauth.AuthDevice(ctx, oauth2.SetAuthURLParam("client_secret", d.oauth.ClientSecret))
 	if err != nil {
 		return nil, err
@@ -55,7 +50,7 @@ func (d *device) Exchange(ctx context.Context) (DeviceVerifier, error) {
 	return &deviceVerifier{d: d, a: a}, nil
 }
 
-func (d *device) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, refreshToken string, err error) {
+func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, refreshToken string, err error) {
 	d.log.Info("refreshing token")
 	tks := d.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh, Expiry: token.Expiry})
 	oauth2Token, err := tks.Token()
@@ -83,7 +78,7 @@ type DeviceVerifier interface {
 }
 
 type deviceVerifier struct {
-	d *device
+	d *deviceHandler
 	a *oauth2.DeviceAuth
 }
 
