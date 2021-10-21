@@ -29,6 +29,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	IDTokenMetadata = "oidc-idtoken"
+	ClaimMetadata   = "oidc-claim"
+)
+
 var (
 	_ GRPCHandler = (*grpcHandler)(nil)
 )
@@ -36,7 +41,7 @@ var (
 type GRPCHandler interface {
 	UnaryServerInterceptor() grpc.UnaryServerInterceptor
 	StreamServerInterceptor() grpc.StreamServerInterceptor
-	Verify(ctx context.Context) error
+	Verify(ctx context.Context) (*oidc.IDToken, error)
 }
 
 type grpcHandler struct {
@@ -49,10 +54,12 @@ type grpcHandler struct {
 func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		log := g.log.WithField("method", info.FullMethod)
-		if err := g.Verify(ctx); err != nil {
+		tk, err := g.Verify(ctx)
+		if err != nil {
 			log.WithError(err).Error("token validation failed")
 			return nil, err
 		}
+		ctx = oidcContext(ctx, tk)
 		return handler(ctx, req)
 	}
 }
@@ -60,30 +67,44 @@ func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 func (g *grpcHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		log := g.log.WithField("method", info.FullMethod)
-		if err := g.Verify(ss.Context()); err != nil {
+		tk, err := g.Verify(ss.Context())
+		if err != nil {
 			log.WithError(err).Error("token validation failed")
 			return err
 		}
-		return handler(srv, ss)
+		ctx := oidcContext(ss.Context(), tk)
+		return handler(srv, &sswrap{ss, ctx})
 	}
 }
 
-func (g *grpcHandler) Verify(ctx context.Context) error {
+func (g *grpcHandler) Verify(ctx context.Context) (*oidc.IDToken, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, status.Error(codes.Unauthenticated, "no id token found in metadata")
 	}
 	a := md.Get("authorization")
 	if len(a) < 1 {
-		return status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, status.Error(codes.Unauthenticated, "no id token found in metadata")
 	}
 	if !strings.HasSuffix(strings.ToLower(a[0]), "bearer ") || len(a) < 8 {
-		return status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
+		return nil, status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
 	}
 	idToken, err := g.verifier.Verify(ctx, a[0][7:])
 	if err != nil {
-		return status.Error(codes.Unauthenticated, err.Error())
+		return nil, status.Error(codes.Unauthenticated, err.Error())
 	}
-	setClaims(ctx, idToken)
-	return nil
+	return idToken, nil
+}
+
+type sswrap struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *sswrap) Context() context.Context {
+	return w.ctx
+}
+
+func (w *sswrap) SetContext(ctx context.Context) {
+	w.ctx = ctx
 }
