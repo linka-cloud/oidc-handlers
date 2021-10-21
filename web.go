@@ -142,7 +142,7 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 
 	if !idToken.Expiry.Before(h.now().Add(idToken.Expiry.Sub(idToken.IssuedAt) / 2)) {
 		log.Infof("skipping refresh (expiry: %v)", idToken.Expiry)
-		*r = *r.WithContext(setClaims(r.Context(), idToken))
+		*r = *r.WithContext(oidcContext(r.Context(), idToken))
 		return "", nil
 	}
 	refreshCookie, err := r.Cookie(h.cookieConfig.RefreshTokenName)
@@ -163,7 +163,7 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 		return "", err
 	}
 	log.Info("token refreshed")
-	*r = *r.WithContext(setClaims(r.Context(), idToken))
+	*r = *r.WithContext(oidcContext(r.Context(), idToken))
 	return oauth2Token.Extra("id_token").(string), nil
 }
 
@@ -180,14 +180,6 @@ func (h *webHandler) handleOauthToken(ctx context.Context, w http.ResponseWriter
 	http.SetCookie(w, h.cookie(h.cookieConfig.RefreshTokenName, oauth2Token.RefreshToken))
 	http.SetCookie(w, h.cookie(h.cookieConfig.IDTokenName, rawIDToken))
 	return tk, nil
-}
-
-func setClaims(ctx context.Context, idToken *oidc.IDToken) context.Context {
-	var claims Claims
-	if err := idToken.Claims(&claims); err != nil {
-		return ctx
-	}
-	return contextWithClaims(ctx, claims)
 }
 
 func (h *webHandler) cookie(name, value string) *http.Cookie {

@@ -18,9 +18,23 @@ package oidc_handlers
 
 import (
 	"context"
+
+	"github.com/coreos/go-oidc/v3/oidc"
 )
 
 type claimsCtx struct{}
+type idTokenCtx struct{}
+
+func setClaims(ctx context.Context, idToken *oidc.IDToken) context.Context {
+	if idToken == nil {
+		return ctx
+	}
+	var claims Claims
+	if err := idToken.Claims(&claims); err != nil {
+		return ctx
+	}
+	return contextWithClaims(ctx, claims)
+}
 
 func contextWithClaims(ctx context.Context, claims Claims) context.Context {
 	return context.WithValue(ctx, claimsCtx{}, claims)
@@ -30,4 +44,21 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 	v := ctx.Value(claimsCtx{})
 	c, ok := v.(Claims)
 	return c, ok
+}
+
+func contextWithIDToken(ctx context.Context, idToken *oidc.IDToken) context.Context {
+	if idToken == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, idTokenCtx{}, *idToken)
+}
+
+func IDTokenFromContext(ctx context.Context) (oidc.IDToken, bool) {
+	v := ctx.Value(idTokenCtx{})
+	c, ok := v.(oidc.IDToken)
+	return c, ok
+}
+
+func oidcContext(ctx context.Context, idToken *oidc.IDToken) context.Context {
+	return contextWithIDToken(setClaims(ctx, idToken), idToken)
 }
