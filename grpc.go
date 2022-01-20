@@ -86,7 +86,7 @@ func (g *grpcHandler) Verify(ctx context.Context) (*oidc.IDToken, error) {
 	if len(a) < 1 {
 		return nil, status.Error(codes.Unauthenticated, "no id token found in metadata")
 	}
-	if !strings.HasSuffix(strings.ToLower(a[0]), "bearer ") || len(a) < 8 {
+	if !strings.HasPrefix(strings.ToLower(a[0]), "bearer ") || len(a) < 8 {
 		return nil, status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
 	}
 	idToken, err := g.verifier.Verify(ctx, a[0][7:])
