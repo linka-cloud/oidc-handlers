@@ -114,6 +114,10 @@ func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
 	}, nil
 }
 
+func (c *Config) LazyWebHandler(ctx context.Context) (WebHandler, error) {
+	return &lazyWebHandler{ctx: ctx, log: c.Logger.WithField("service", "oidcHandlers"), config: c}, nil
+}
+
 func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
 	oauth2Config, verifier, err := c.apply(ctx)
 	if err != nil {
