@@ -39,6 +39,7 @@ type Handler = WebHandler
 
 // WebHandler is the oidc handler for standard web auth flow
 type WebHandler interface {
+	LoginHandler(w http.ResponseWriter, r *http.Request)
 	RedirectHandler(w http.ResponseWriter, r *http.Request)
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
 	Callback(w http.ResponseWriter, r *http.Request) error
@@ -76,6 +77,20 @@ type webHandler struct {
 
 func (h *webHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
 	http.SetCookie(w, h.cookie(h.cookieConfig.RedirectName, path))
+}
+
+func (h *webHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.Refresh(w, r); err == nil {
+		path := "/"
+		if c, err := r.Cookie(h.cookieConfig.RedirectName); err == nil && c.Value != "" {
+			path = c.Value
+		} else if r := r.URL.Query().Get("redirect"); r != "" {
+			path = r
+		}
+		http.Redirect(w, r, path, http.StatusSeeOther)
+		return
+	}
+	h.RedirectHandler(w, r)
 }
 
 func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
