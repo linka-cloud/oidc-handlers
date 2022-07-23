@@ -222,7 +222,7 @@ func (h *webHandler) deleteCookie(w http.ResponseWriter, name string) {
 func (h *webHandler) CleanCookies(w http.ResponseWriter) {
 	h.deleteCookie(w, h.cookieConfig.IDTokenName)
 	h.deleteCookie(w, h.cookieConfig.RefreshTokenName)
-	h.deleteCookie(w, h.cookieConfig.RedirectName)
+	// h.deleteCookie(w, h.cookieConfig.RedirectName)
 	h.deleteCookie(w, h.cookieConfig.AuthStateName)
 }
 
