@@ -59,7 +59,7 @@ func device(ctx context.Context, config oidch.Config) error {
 		return err
 	}
 	logrus.Infof("Please visit %s to authenticate", v.URI())
-	if _, _, err := v.Verify(ctx); err != nil {
+	if _, _, _, err := v.Verify(ctx); err != nil {
 		return err
 	}
 	logrus.Infof("Device authentication succeed")

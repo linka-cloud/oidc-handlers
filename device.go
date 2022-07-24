@@ -74,7 +74,7 @@ func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refres
 
 type DeviceVerifier interface {
 	URI() string
-	Verify(ctx context.Context) (tk *oidc.IDToken, refreshToken string, err error)
+	Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
 }
 
 type deviceVerifier struct {
@@ -89,19 +89,19 @@ func (v *deviceVerifier) URI() string {
 	return v.a.VerificationURI
 }
 
-func (v *deviceVerifier) Verify(ctx context.Context) (tk *oidc.IDToken, refreshToken string, err error) {
+func (v *deviceVerifier) Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
 	oauth2Token, err := v.d.oauth.Poll(ctx, v.a)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		return nil, "", errors.New("id_token not found")
+		return nil, "", "", errors.New("id_token not found")
 	}
 
 	tk, err = v.d.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return tk, oauth2Token.RefreshToken, nil
+	return tk, rawIDToken, oauth2Token.RefreshToken, nil
 }
