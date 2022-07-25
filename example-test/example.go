@@ -36,7 +36,7 @@ func main() {
 		ClientSecret:  "0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44",
 		OauthCallback: "http://example.localhost:8888/auth/callback",
 	}
-	devCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	devCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
 	// Perform single device auth flow

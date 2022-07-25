@@ -5,7 +5,6 @@ expiry:
     reuseInterval: "5s"
 oauth2:
   skipApprovalScreen: true
-  passwordConnector: ldap-aggregator
 storage:
   type: sqlite3
   config:
@@ -13,8 +12,8 @@ storage:
 web:
   http: 0.0.0.0:5556
 frontend:
-  theme: partitio
-  issuer: Partitio
+  theme: light
+  issuer: Dex
 staticClients:
 - id: oidc
   redirectURIs:

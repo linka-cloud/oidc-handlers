@@ -73,6 +73,8 @@ type webHandler struct {
 
 	now func() time.Time
 	mu  sync.RWMutex
+
+	opts func(ctx context.Context) []oauth2.AuthCodeOption
 }
 
 func (h *webHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
@@ -99,7 +101,7 @@ func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 	h.ensureCookieDomain(r)
 	state := newState()
 	http.SetCookie(w, h.cookie(h.cookieConfig.AuthStateName, state))
-	http.Redirect(w, r, h.oauth.AuthCodeURL(state), http.StatusFound)
+	http.Redirect(w, r, h.oauth.AuthCodeURL(state, h.opts(r.Context())...), http.StatusFound)
 }
 
 func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
@@ -113,7 +115,7 @@ func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
 	if r.URL.Query().Get("state") != stateCookie.Value {
 		return errors.New("invalid state cookie")
 	}
-	oauth2Token, err := h.oauth.Exchange(r.Context(), r.URL.Query().Get("code"))
+	oauth2Token, err := h.oauth.Exchange(r.Context(), r.URL.Query().Get("code"), h.opts(r.Context())...)
 	if err != nil {
 		h.CleanCookies(w)
 		return fmt.Errorf("no token: %w", err)

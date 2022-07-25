@@ -67,6 +67,7 @@ type Config struct {
 	CookieConfig  CookieConfig
 	Scopes        []string
 	Logger        logrus.FieldLogger
+	Opts          func(ctx context.Context) []oauth2.AuthCodeOption
 }
 
 func (c *Config) Defaults() {
@@ -78,6 +79,11 @@ func (c *Config) Defaults() {
 		log := logrus.New()
 		log.SetOutput(io.Discard)
 		c.Logger = log
+	}
+	if c.Opts == nil {
+		c.Opts = func(ctx context.Context) []oauth2.AuthCodeOption {
+			return nil
+		}
 	}
 }
 
@@ -111,6 +117,7 @@ func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
 		verifier:     verifier,
 		now:          now,
 		log:          c.Logger.WithField("oidc", "web"),
+		opts:         c.Opts,
 	}, nil
 }
 

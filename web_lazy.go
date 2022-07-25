@@ -19,6 +19,7 @@ package oidc_handlers
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -28,6 +29,7 @@ type lazyWebHandler struct {
 	log    logrus.FieldLogger
 	config *Config
 	h      WebHandler
+	mu     sync.RWMutex
 }
 
 func (l *lazyWebHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -91,9 +93,14 @@ func (l *lazyWebHandler) CleanCookies(w http.ResponseWriter) {
 }
 
 func (l *lazyWebHandler) handler() (WebHandler, error) {
+	l.mu.RLock()
 	if l.h != nil {
+		l.mu.RUnlock()
 		return l.h, nil
 	}
+	l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	var err error
 	if l.h, err = l.config.WebHandler(l.ctx); err != nil {
 		l.log.WithError(err).Error("handler init failed")

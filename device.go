@@ -31,8 +31,8 @@ var (
 )
 
 type DeviceHandler interface {
-	Exchange(ctx context.Context) (DeviceVerifier, error)
-	Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, refreshToken string, err error)
+	Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error)
+	Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
 }
 
 type deviceHandler struct {
@@ -42,34 +42,35 @@ type deviceHandler struct {
 	log      logrus.FieldLogger
 }
 
-func (d *deviceHandler) Exchange(ctx context.Context) (DeviceVerifier, error) {
-	a, err := d.oauth.AuthDevice(ctx, oauth2.SetAuthURLParam("client_secret", d.oauth.ClientSecret))
+func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error) {
+	opts = append(opts, oauth2.SetAuthURLParam("client_secret", d.oauth.ClientSecret))
+	a, err := d.oauth.AuthDevice(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return &deviceVerifier{d: d, a: a}, nil
 }
 
-func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, refreshToken string, err error) {
+func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
 	d.log.Info("refreshing token")
 	tks := d.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh, Expiry: token.Expiry})
 	oauth2Token, err := tks.Token()
 	if err != nil {
 		d.log.WithError(err).Error("refresh token")
-		return nil, "", err
+		return nil, "", "", err
 	}
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
 		d.log.Error("id_token not found")
-		return nil, "", errors.New("id_token not found")
+		return nil, "", "", errors.New("id_token not found")
 	}
 	tk, err = d.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		d.log.WithError(err).Error("verify token")
-		return nil, "", fmt.Errorf("verify token: %w", err)
+		return nil, "", "", fmt.Errorf("verify token: %w", err)
 	}
 	d.log.Info("token refreshed")
-	return tk, oauth2Token.Extra("id_token").(string), nil
+	return tk, rawIDToken, oauth2Token.Extra("id_token").(string), nil
 }
 
 type DeviceVerifier interface {
