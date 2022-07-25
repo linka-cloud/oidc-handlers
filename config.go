@@ -148,3 +148,10 @@ func (c *Config) GRPC(ctx context.Context) (GRPCHandler, error) {
 		log:      c.Logger.WithField("oidc", "grpc"),
 	}, nil
 }
+
+func (c *Config) LazyGRPCHandler(ctx context.Context) (GRPCHandler, error) {
+	return &lazyGRPCHandler{
+		ctx:    ctx,
+		config: c,
+	}, nil
+}
