@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 )
@@ -82,7 +83,7 @@ func (c *Config) Defaults() {
 	}
 	if c.Opts == nil {
 		c.Opts = func(ctx context.Context) []oauth2.AuthCodeOption {
-			return nil
+			return []oauth2.AuthCodeOption{oidc.Nonce(uuid.New().String())}
 		}
 	}
 }
