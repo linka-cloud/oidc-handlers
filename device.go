@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/sirupsen/logrus"
@@ -33,18 +35,20 @@ var (
 type DeviceHandler interface {
 	Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error)
 	Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
+	Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken, refreshToken string) error
 }
 
 type deviceHandler struct {
 	oauth oauth2.Config
 
-	verifier *oidc.IDTokenVerifier
-	log      logrus.FieldLogger
+	verifier   *oidc.IDTokenVerifier
+	log        logrus.FieldLogger
+	endSession string
 }
 
 func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error) {
 	opts = append(opts, oauth2.SetAuthURLParam("client_secret", d.oauth.ClientSecret))
-	a, err := d.oauth.AuthDevice(ctx, opts...)
+	a, err := d.oauth.DeviceAuth(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +77,30 @@ func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refres
 	return tk, rawIDToken, oauth2Token.Extra("id_token").(string), nil
 }
 
+func (d *deviceHandler) Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken, refreshToken string) error {
+	if d.endSession == "" {
+		return nil
+	}
+	_, rawIDToken, _, err := d.Refresh(ctx, tk, refreshToken)
+	if err != nil {
+		return fmt.Errorf("refresh token: %w", err)
+	}
+	u, err := logoutURI(d.endSession, rawIDToken)
+	if err != nil {
+		return fmt.Errorf("end session url: %v", err)
+	}
+	res, err := http.Get(u)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusOK {
+		return nil
+	}
+	b, _ := io.ReadAll(res.Body)
+	return fmt.Errorf("end session: %s", string(b))
+}
+
 type DeviceVerifier interface {
 	URI() string
 	Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
@@ -80,7 +108,7 @@ type DeviceVerifier interface {
 
 type deviceVerifier struct {
 	d *deviceHandler
-	a *oauth2.DeviceAuth
+	a *oauth2.DeviceAuthResponse
 }
 
 func (v *deviceVerifier) URI() string {
@@ -91,7 +119,7 @@ func (v *deviceVerifier) URI() string {
 }
 
 func (v *deviceVerifier) Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
-	oauth2Token, err := v.d.oauth.Poll(ctx, v.a)
+	oauth2Token, err := v.d.oauth.DeviceAccessToken(ctx, v.a)
 	if err != nil {
 		return nil, "", "", err
 	}

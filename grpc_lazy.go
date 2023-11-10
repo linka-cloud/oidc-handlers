@@ -35,10 +35,10 @@ func (l *lazyGRPCHandler) StreamServerInterceptor() grpc.StreamServerInterceptor
 	}
 }
 
-func (l *lazyGRPCHandler) Verify(ctx context.Context) (*oidc.IDToken, error) {
+func (l *lazyGRPCHandler) Verify(ctx context.Context) (*oidc.IDToken, string, error) {
 	h, err := l.handler()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	return h.Verify(ctx)
 }

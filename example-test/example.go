@@ -31,18 +31,23 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	config := oidch.Config{
-		IssuerURL:     "http://localhost:5556",
+		IssuerURL:     "http://oidc.test:5556",
 		ClientID:      "oidc",
 		ClientSecret:  "0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44",
-		OauthCallback: "http://example.localhost:8888/auth/callback",
+		OauthCallback: "http://app.oidc.test:8888/auth/callback",
+		CookieConfig: oidch.CookieConfig{
+			Key: "secret-key",
+		},
 	}
 	devCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	// Perform single device auth flow
-	if err := device(devCtx, config); err != nil {
-		logrus.Fatal(err)
-	}
+	go func() {
+		// Perform single device auth flow
+		if err := device(devCtx, config); err != nil {
+			logrus.Error(err)
+		}
+	}()
 	// Start web app
 	if err := web(ctx, config); err != nil {
 		logrus.Fatal(err)
@@ -73,6 +78,7 @@ func web(ctx context.Context, config oidch.Config) error {
 	}
 	http.HandleFunc("/auth", oidc.RedirectHandler)
 	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
+	http.HandleFunc("/logout", oidc.Logout)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := oidc.Refresh(w, r); err != nil {
 			logrus.Error(err)
@@ -93,6 +99,6 @@ func web(ctx context.Context, config oidch.Config) error {
 			next.ServeHTTP(w, r)
 		})
 	}
-	logrus.Info("Starting web server at http://example.localhost:8888")
+	logrus.Info("Starting web server at http://app.oidc.test:8888")
 	return http.ListenAndServe(":8888", lm(http.DefaultServeMux))
 }

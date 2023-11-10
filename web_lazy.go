@@ -76,6 +76,15 @@ func (l *lazyWebHandler) Refresh(w http.ResponseWriter, r *http.Request) (idToke
 	return h.Refresh(w, r)
 }
 
+func (l *lazyWebHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	h, err := l.handler()
+	if err != nil {
+		http.Error(w, "", http.StatusServiceUnavailable)
+		return
+	}
+	h.Logout(w, r)
+}
+
 func (l *lazyWebHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
 	h, err := l.handler()
 	if err != nil {

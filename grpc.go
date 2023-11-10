@@ -41,7 +41,7 @@ var (
 type GRPCHandler interface {
 	UnaryServerInterceptor() grpc.UnaryServerInterceptor
 	StreamServerInterceptor() grpc.StreamServerInterceptor
-	Verify(ctx context.Context) (*oidc.IDToken, error)
+	Verify(ctx context.Context) (*oidc.IDToken, string, error)
 }
 
 type grpcHandler struct {
@@ -54,12 +54,12 @@ type grpcHandler struct {
 func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		log := g.log.WithField("method", info.FullMethod)
-		tk, err := g.Verify(ctx)
+		tk, raw, err := g.Verify(ctx)
 		if err != nil {
 			log.WithError(err).Error("token validation failed")
 			return nil, err
 		}
-		ctx = oidcContext(ctx, tk)
+		ctx = oidcContext(ctx, tk, raw)
 		return handler(ctx, req)
 	}
 }
@@ -67,33 +67,34 @@ func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 func (g *grpcHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		log := g.log.WithField("method", info.FullMethod)
-		tk, err := g.Verify(ss.Context())
+		tk, raw, err := g.Verify(ss.Context())
 		if err != nil {
 			log.WithError(err).Error("token validation failed")
 			return err
 		}
-		ctx := oidcContext(ss.Context(), tk)
+		ctx := oidcContext(ss.Context(), tk, raw)
 		return handler(srv, &sswrap{ss, ctx})
 	}
 }
 
-func (g *grpcHandler) Verify(ctx context.Context) (*oidc.IDToken, error) {
+func (g *grpcHandler) Verify(ctx context.Context) (*oidc.IDToken, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, "", status.Error(codes.Unauthenticated, "no id token found in metadata")
 	}
 	a := md.Get("authorization")
 	if len(a) < 1 {
-		return nil, status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, "", status.Error(codes.Unauthenticated, "no id token found in metadata")
 	}
 	if !strings.HasPrefix(strings.ToLower(a[0]), "bearer ") {
-		return nil, status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
+		return nil, "", status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
 	}
-	idToken, err := g.verifier.Verify(ctx, a[0][7:])
+	raw := a[0][7:]
+	idToken, err := g.verifier.Verify(ctx, raw)
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, err.Error())
+		return nil, "", status.Error(codes.Unauthenticated, err.Error())
 	}
-	return idToken, nil
+	return idToken, raw, nil
 }
 
 type sswrap struct {

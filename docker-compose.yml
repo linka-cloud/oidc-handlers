@@ -3,7 +3,7 @@ version: '3'
 
 services:
   dex:
-    image: ghcr.io/dexidp/dex:v2.32.0
+    image: linkacloud/dex
     restart: always
     command:
     - dex
@@ -13,7 +13,7 @@ services:
     - "DEX_EXPAND_ENV=false"
     - "DEX_SESSION_AUTHKEY=90bc891caf30f994c2fc18663ad8394e"
     - "DEX_SESSION_ENCKEY=8b13ebf9c3bfebfd63863fc841a6d473"
-    - "DEX_SESSION_DOMAIN=example.localhost"
+    - "DEX_SESSION_DOMAIN=oidc.test"
     ports:
     - 5556:5556
     volumes:

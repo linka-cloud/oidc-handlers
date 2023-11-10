@@ -18,11 +18,13 @@ package oidc_handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"io"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
+	"github.com/gorilla/securecookie"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 )
@@ -43,6 +45,10 @@ type CookieConfig struct {
 	RedirectName     string
 	Domain           string
 	Secure           bool
+	Key              string
+
+	key []byte
+	sec *securecookie.SecureCookie
 }
 
 func (c *CookieConfig) Defaults() {
@@ -57,6 +63,11 @@ func (c *CookieConfig) Defaults() {
 	}
 	if c.RedirectName == "" {
 		c.RedirectName = DefaultRedirectName
+	}
+	if c.Key != "" {
+		k := sha256.Sum256([]byte(c.Key))
+		c.key = k[:]
+		c.sec = securecookie.New(c.key, c.key)
 	}
 }
 
@@ -88,11 +99,11 @@ func (c *Config) Defaults() {
 	}
 }
 
-func (c *Config) apply(ctx context.Context) (oauth2.Config, *oidc.IDTokenVerifier, error) {
+func (c *Config) apply(ctx context.Context) (oauth2.Config, *oidc.IDTokenVerifier, string, error) {
 	c.Defaults()
 	provider, err := oidc.NewProvider(ctx, c.IssuerURL)
 	if err != nil {
-		return oauth2.Config{}, nil, err
+		return oauth2.Config{}, nil, "", err
 	}
 	// Configure an OpenID Connect aware OAuth2 client.
 	oauth2Config := oauth2.Config{
@@ -103,12 +114,12 @@ func (c *Config) apply(ctx context.Context) (oauth2.Config, *oidc.IDTokenVerifie
 		Scopes:       c.Scopes,
 	}
 	verifier := provider.Verifier(&oidc.Config{ClientID: c.ClientID, SkipExpiryCheck: true, Now: now})
-	return oauth2Config, verifier, nil
+	return oauth2Config, verifier, provider.EndSessionURL(), nil
 }
 
 // WebHandler creates a web auth flow handler from config
 func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
-	oauth2Config, verifier, err := c.apply(ctx)
+	oauth2Config, verifier, endSession, err := c.apply(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +130,7 @@ func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
 		now:          now,
 		log:          c.Logger.WithField("oidc", "web"),
 		opts:         c.Opts,
+		endSession:   endSession,
 	}, nil
 }
 
@@ -127,19 +139,20 @@ func (c *Config) LazyWebHandler(ctx context.Context) (WebHandler, error) {
 }
 
 func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
-	oauth2Config, verifier, err := c.apply(ctx)
+	oauth2Config, verifier, endSession, err := c.apply(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &deviceHandler{
-		oauth:    oauth2Config,
-		verifier: verifier,
-		log:      c.Logger.WithField("oidc", "device"),
+		oauth:      oauth2Config,
+		verifier:   verifier,
+		log:        c.Logger.WithField("oidc", "device"),
+		endSession: endSession,
 	}, nil
 }
 
 func (c *Config) GRPC(ctx context.Context) (GRPCHandler, error) {
-	oauth2Config, verifier, err := c.apply(ctx)
+	oauth2Config, verifier, _, err := c.apply(ctx)
 	if err != nil {
 		return nil, err
 	}

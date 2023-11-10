@@ -1,4 +1,4 @@
-issuer: http://localhost:5556
+issuer: http://oidc.test:5556
 expiry:
   idTokens: "5s"
   refreshTokens:
@@ -17,11 +17,11 @@ frontend:
 staticClients:
 - id: oidc
   redirectURIs:
-  - 'http://example.localhost:8888/auth/callback'
+  - 'http://app.oidc.test:8888/auth/callback'
   - '/device/callback'
   name: 'OIDC Handlers'
   secret: 0TJ3992YlriTfyuTgcO81L8b6eZWlWwKC2Gqij5nR44
-
+defaultConnector: local
 enablePasswordDB: true
 staticPasswords:
 - email: "admin@example.com"

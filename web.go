@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -44,13 +45,14 @@ type WebHandler interface {
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
 	Callback(w http.ResponseWriter, r *http.Request) error
 	Refresh(w http.ResponseWriter, r *http.Request) (idToken string, err error)
+	Logout(w http.ResponseWriter, r *http.Request)
 	SetRedirectCookie(w http.ResponseWriter, path string)
 	CleanCookies(w http.ResponseWriter)
 }
 
 // Deprecated: use Config.WebHandler instead
 func New(ctx context.Context, config Config) (Handler, error) {
-	oauth2Config, verifier, err := config.apply(ctx)
+	oauth2Config, verifier, endSession, err := config.apply(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +62,7 @@ func New(ctx context.Context, config Config) (Handler, error) {
 		verifier:     verifier,
 		now:          now,
 		log:          config.Logger,
+		endSession:   endSession,
 	}
 	return h, nil
 }
@@ -74,18 +77,19 @@ type webHandler struct {
 	now func() time.Time
 	mu  sync.RWMutex
 
-	opts func(ctx context.Context) []oauth2.AuthCodeOption
+	opts       func(ctx context.Context) []oauth2.AuthCodeOption
+	endSession string
 }
 
 func (h *webHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
-	http.SetCookie(w, h.cookie(h.cookieConfig.RedirectName, path))
+	http.SetCookie(w, h.newCookie(h.cookieConfig.RedirectName, path))
 }
 
 func (h *webHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Refresh(w, r); err == nil {
 		path := "/"
-		if c, err := r.Cookie(h.cookieConfig.RedirectName); err == nil && c.Value != "" {
-			path = c.Value
+		if c, err := h.cookie(r, h.cookieConfig.RedirectName); err == nil && c != "" {
+			path = c
 		} else if r := r.URL.Query().Get("redirect"); r != "" {
 			path = r
 		}
@@ -100,19 +104,19 @@ func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 	log.Info("redirect")
 	h.ensureCookieDomain(r)
 	state := newState()
-	http.SetCookie(w, h.cookie(h.cookieConfig.AuthStateName, state))
+	http.SetCookie(w, h.newCookie(h.cookieConfig.AuthStateName, state))
 	http.Redirect(w, r, h.oauth.AuthCodeURL(state, h.opts(r.Context())...), http.StatusFound)
 }
 
 func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
 	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
 	log.Info("callback")
-	stateCookie, err := r.Cookie(h.cookieConfig.AuthStateName)
+	stateCookie, err := h.cookie(r, h.cookieConfig.AuthStateName)
 	if err != nil {
 		h.CleanCookies(w)
 		return fmt.Errorf("state cookie: %w", err)
 	}
-	if r.URL.Query().Get("state") != stateCookie.Value {
+	if r.URL.Query().Get("state") != stateCookie {
 		return errors.New("invalid state cookie")
 	}
 	oauth2Token, err := h.oauth.Exchange(r.Context(), r.URL.Query().Get("code"), h.opts(r.Context())...)
@@ -120,13 +124,13 @@ func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
 		h.CleanCookies(w)
 		return fmt.Errorf("no token: %w", err)
 	}
-	if _, err := h.handleOauthToken(r.Context(), w, oauth2Token); err != nil {
+	if _, _, err := h.handleOauthToken(r.Context(), w, oauth2Token); err != nil {
 		h.CleanCookies(w)
 		return fmt.Errorf("invalid token: %w", err)
 	}
 	path := "/"
-	if c, err := r.Cookie(h.cookieConfig.RedirectName); err == nil && c.Value != "" {
-		path = c.Value
+	if c, err := h.cookie(r, h.cookieConfig.RedirectName); err == nil && c != "" {
+		path = c
 	}
 	h.deleteCookie(w, h.cookieConfig.AuthStateName)
 	h.deleteCookie(w, h.cookieConfig.RedirectName)
@@ -144,12 +148,12 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
 	log.Info("refresh")
 	h.ensureCookieDomain(r)
-	idCookie, err := r.Cookie(h.cookieConfig.IDTokenName)
+	idCookie, err := h.cookie(r, h.cookieConfig.IDTokenName)
 	if err != nil {
 		h.CleanCookies(w)
 		return "", fmt.Errorf("oidc cookie: %w", err)
 	}
-	idToken, err := h.verifier.Verify(r.Context(), idCookie.Value)
+	idToken, err := h.verifier.Verify(r.Context(), idCookie)
 	if err != nil {
 		log.WithError(err).Error("verify token")
 		h.CleanCookies(w)
@@ -159,49 +163,80 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 
 	if !idToken.Expiry.Before(h.now().Add(idToken.Expiry.Sub(idToken.IssuedAt) / 2)) {
 		log.Infof("skipping refresh (expiry: %v)", idToken.Expiry)
-		*r = *r.WithContext(oidcContext(r.Context(), idToken))
+		*r = *r.WithContext(oidcContext(r.Context(), idToken, idCookie))
 		return "", nil
 	}
-	refreshCookie, err := r.Cookie(h.cookieConfig.RefreshTokenName)
+	refreshCookie, err := h.cookie(r, h.cookieConfig.RefreshTokenName)
 	if err != nil {
 		h.CleanCookies(w)
 		log.WithError(err).Error("refresh cookie")
 		return "", fmt.Errorf("refresh cookie: %w", err)
 	}
-	tk := h.oauth.TokenSource(r.Context(), &oauth2.Token{RefreshToken: refreshCookie.Value, Expiry: idToken.Expiry})
+	tk := h.oauth.TokenSource(r.Context(), &oauth2.Token{RefreshToken: refreshCookie, Expiry: idToken.Expiry})
 	oauth2Token, err := tk.Token()
 	if err != nil {
 		log.WithError(err).Error("refresh token")
 		return "", err
 	}
-	idToken, err = h.handleOauthToken(r.Context(), w, oauth2Token)
+	var rawIDToken string
+	idToken, rawIDToken, err = h.handleOauthToken(r.Context(), w, oauth2Token)
 	if err != nil {
 		log.WithError(err).Error("handle token")
 		return "", err
 	}
 	log.Info("token refreshed")
-	*r = *r.WithContext(oidcContext(r.Context(), idToken))
+	*r = *r.WithContext(oidcContext(r.Context(), idToken, rawIDToken))
 	return oauth2Token.Extra("id_token").(string), nil
 }
 
-func (h *webHandler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, error) {
+func (h *webHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.Refresh(w, r); err != nil {
+		logrus.Error(err)
+		h.CleanCookies(w)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	h.CleanCookies(w)
+	if h.endSession == "" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	id, ok := RawIDTokenFromContext(r.Context())
+	if !ok {
+		logrus.Errorf("token refreshed but raw id token not in context")
+		http.Error(w, "", http.StatusInternalServerError)
+	}
+	u, err := logoutURI(h.endSession, id)
+	if err != nil {
+		logrus.Errorf("end session url: %v", err)
+		http.Error(w, "", http.StatusInternalServerError)
+	}
+	http.Redirect(w, r, u, http.StatusSeeOther)
+}
+
+func (h *webHandler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, string, error) {
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		return nil, errors.New("id_token not found")
+		return nil, "", errors.New("id_token not found")
 	}
 
 	tk, err := h.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("verify token: %w", err)
+		return nil, "", fmt.Errorf("verify token: %w", err)
 	}
-	http.SetCookie(w, h.cookie(h.cookieConfig.RefreshTokenName, oauth2Token.RefreshToken))
-	http.SetCookie(w, h.cookie(h.cookieConfig.IDTokenName, rawIDToken))
-	return tk, nil
+	http.SetCookie(w, h.newCookie(h.cookieConfig.RefreshTokenName, oauth2Token.RefreshToken))
+	http.SetCookie(w, h.newCookie(h.cookieConfig.IDTokenName, rawIDToken))
+	return tk, rawIDToken, nil
 }
 
-func (h *webHandler) cookie(name, value string) *http.Cookie {
+func (h *webHandler) newCookie(name, value string) *http.Cookie {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	if h.cookieConfig.sec != nil {
+		if v, err := h.cookieConfig.sec.Encode(name, value); err == nil {
+			value = v
+		}
+	}
 	return &http.Cookie{
 		Name:     name,
 		Value:    value,
@@ -210,6 +245,21 @@ func (h *webHandler) cookie(name, value string) *http.Cookie {
 		Secure:   h.cookieConfig.Secure,
 		HttpOnly: true,
 	}
+}
+
+func (h *webHandler) cookie(r *http.Request, name string) (string, error) {
+	c, err := r.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+	if h.cookieConfig.sec == nil {
+		return c.Value, nil
+	}
+	var v string
+	if err := h.cookieConfig.sec.Decode(name, c.Value, &v); err != nil {
+		return "", err
+	}
+	return v, nil
 }
 
 func (h *webHandler) deleteCookie(w http.ResponseWriter, name string) {
@@ -238,4 +288,15 @@ func (h *webHandler) ensureCookieDomain(r *http.Request) {
 	h.mu.Lock()
 	h.cookieConfig.Domain = strings.Split(r.Host, ":")[0]
 	h.mu.Unlock()
+}
+
+func logoutURI(endSession string, rawIDToken string) (string, error) {
+	u, err := url.Parse(endSession)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("id_token_hint", rawIDToken)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }

@@ -25,6 +25,8 @@ import (
 type claimsCtx struct{}
 type idTokenCtx struct{}
 
+type rawIDTokenCtx struct{}
+
 func setClaims(ctx context.Context, idToken *oidc.IDToken) context.Context {
 	if idToken == nil {
 		return ctx
@@ -41,9 +43,8 @@ func contextWithClaims(ctx context.Context, claims Claims) context.Context {
 }
 
 func ClaimsFromContext(ctx context.Context) (Claims, bool) {
-	v := ctx.Value(claimsCtx{})
-	c, ok := v.(Claims)
-	return c, ok
+	v, ok := ctx.Value(claimsCtx{}).(Claims)
+	return v, ok
 }
 
 func contextWithIDToken(ctx context.Context, idToken *oidc.IDToken) context.Context {
@@ -54,11 +55,19 @@ func contextWithIDToken(ctx context.Context, idToken *oidc.IDToken) context.Cont
 }
 
 func IDTokenFromContext(ctx context.Context) (oidc.IDToken, bool) {
-	v := ctx.Value(idTokenCtx{})
-	c, ok := v.(oidc.IDToken)
-	return c, ok
+	v, ok := ctx.Value(idTokenCtx{}).(oidc.IDToken)
+	return v, ok
 }
 
-func oidcContext(ctx context.Context, idToken *oidc.IDToken) context.Context {
-	return contextWithIDToken(setClaims(ctx, idToken), idToken)
+func contextWithRawIDToken(ctx context.Context, rawIDToken string) context.Context {
+	return context.WithValue(ctx, rawIDTokenCtx{}, rawIDToken)
+}
+
+func RawIDTokenFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(rawIDTokenCtx{}).(string)
+	return v, ok
+}
+
+func oidcContext(ctx context.Context, idToken *oidc.IDToken, rawIDToken string) context.Context {
+	return contextWithRawIDToken(contextWithIDToken(setClaims(ctx, idToken), idToken), rawIDToken)
 }
