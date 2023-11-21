@@ -74,7 +74,7 @@ func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refres
 		return nil, "", "", fmt.Errorf("verify token: %w", err)
 	}
 	d.log.Info("token refreshed")
-	return tk, rawIDToken, oauth2Token.Extra("id_token").(string), nil
+	return tk, rawIDToken, oauth2Token.RefreshToken, nil
 }
 
 func (d *deviceHandler) Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken, refreshToken string) error {
