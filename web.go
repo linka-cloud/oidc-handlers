@@ -52,6 +52,7 @@ type WebHandler interface {
 
 // Deprecated: use Config.WebHandler instead
 func New(ctx context.Context, config Config) (Handler, error) {
+	config.Defaults()
 	oauth2Config, verifier, endSession, err := config.apply(ctx)
 	if err != nil {
 		return nil, err
