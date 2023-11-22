@@ -108,12 +108,18 @@ func (h *webHandler) Middleware(authPath string) func(r http.Handler) http.Handl
 				next.ServeHTTP(w, r)
 				return
 			}
-			if _, err := h.Refresh(w, r); err == nil {
-				next.ServeHTTP(w, r)
+			if _, err := h.Refresh(w, r); err != nil {
+				h.SetRedirectCookie(w, r.URL.Path)
+				http.Redirect(w, r, authPath, http.StatusSeeOther)
 				return
 			}
-			h.SetRedirectCookie(w, r.URL.Path)
-			http.Redirect(w, r, authPath, http.StatusSeeOther)
+			// retrieve the id token and set it as authorization header for the next handlers
+			tk, ok := RawIDTokenFromContext(r.Context())
+			if !ok {
+				panic("token refreshed but raw id token not in context")
+			}
+			r.Header.Set("Authorization", "Bearer "+tk)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
