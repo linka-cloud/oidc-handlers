@@ -44,6 +44,7 @@ type WebHandler interface {
 	LogoutHandler(w http.ResponseWriter, r *http.Request)
 	RedirectHandler(w http.ResponseWriter, r *http.Request)
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
+	Middleware(authPath string) func(r http.Handler) http.Handler
 	Callback(w http.ResponseWriter, r *http.Request) error
 	Refresh(w http.ResponseWriter, r *http.Request) (idToken string, err error)
 	SetRedirectCookie(w http.ResponseWriter, path string)
@@ -98,6 +99,23 @@ func (h *webHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.RedirectHandler(w, r)
+}
+
+func (h *webHandler) Middleware(authPath string) func(r http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, authPath) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if _, err := h.Refresh(w, r); err == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			h.SetRedirectCookie(w, r.URL.Path)
+			http.Redirect(w, r, authPath, http.StatusSeeOther)
+		})
+	}
 }
 
 func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +205,7 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 	}
 	log.Info("token refreshed")
 	*r = *r.WithContext(oidcContext(r.Context(), idToken, rawIDToken))
-	return oauth2Token.Extra("id_token").(string), nil
+	return rawIDToken, nil
 }
 
 func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {

@@ -85,6 +85,42 @@ func (l *lazyWebHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	h.LogoutHandler(w, r)
 }
 
+func (l *lazyWebHandler) Middleware(authPath string) func(r http.Handler) http.Handler {
+	h, err := l.handler()
+	if err == nil {
+		return h.Middleware(authPath)
+	}
+	var (
+		mu   sync.RWMutex
+		mldw http.Handler
+	)
+	mk := func(next http.Handler) (http.Handler, bool) {
+		mu.RLock()
+		if mldw != nil {
+			mu.RUnlock()
+			return mldw, true
+		}
+		mu.Unlock()
+		h, err := l.handler()
+		if err != nil {
+			return nil, false
+		}
+		mu.Lock()
+		mldw = h.Middleware(authPath)(next)
+		mu.Unlock()
+		return mldw, true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if h, ok := mk(next); ok {
+				h.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "", http.StatusServiceUnavailable)
+		})
+	}
+}
+
 func (l *lazyWebHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
 	h, err := l.handler()
 	if err != nil {

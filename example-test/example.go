@@ -76,16 +76,11 @@ func web(ctx context.Context, config oidch.Config) error {
 	if err != nil {
 		return err
 	}
-	http.HandleFunc("/auth", oidc.RedirectHandler)
-	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
-	http.HandleFunc("/logout", oidc.LogoutHandler)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := oidc.Refresh(w, r); err != nil {
-			logrus.Error(err)
-			oidc.SetRedirectCookie(w, "/")
-			http.Redirect(w, r, "/auth", http.StatusSeeOther)
-			return
-		}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth", oidc.RedirectHandler)
+	mux.HandleFunc("/auth/callback", oidc.CallbackHandler)
+	mux.HandleFunc("/logout", oidc.LogoutHandler)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		c, ok := oidch.ClaimsFromContext(r.Context())
 		if !ok {
 			http.Error(w, "no claims found", http.StatusInternalServerError)
@@ -100,5 +95,5 @@ func web(ctx context.Context, config oidch.Config) error {
 		})
 	}
 	logrus.Info("Starting web server at http://app.oidc.test:8888")
-	return http.ListenAndServe(":8888", lm(http.DefaultServeMux))
+	return http.ListenAndServe(":8888", lm(oidc.Middleware("/auth")(mux)))
 }
