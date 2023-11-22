@@ -41,11 +41,11 @@ type Handler = WebHandler
 // WebHandler is the oidc handler for standard web auth flow
 type WebHandler interface {
 	LoginHandler(w http.ResponseWriter, r *http.Request)
+	LogoutHandler(w http.ResponseWriter, r *http.Request)
 	RedirectHandler(w http.ResponseWriter, r *http.Request)
 	CallbackHandler(w http.ResponseWriter, r *http.Request)
 	Callback(w http.ResponseWriter, r *http.Request) error
 	Refresh(w http.ResponseWriter, r *http.Request) (idToken string, err error)
-	Logout(w http.ResponseWriter, r *http.Request)
 	SetRedirectCookie(w http.ResponseWriter, path string)
 	CleanCookies(w http.ResponseWriter)
 }
@@ -189,7 +189,7 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 	return oauth2Token.Extra("id_token").(string), nil
 }
 
-func (h *webHandler) Logout(w http.ResponseWriter, r *http.Request) {
+func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Refresh(w, r); err != nil {
 		logrus.Error(err)
 		h.CleanCookies(w)

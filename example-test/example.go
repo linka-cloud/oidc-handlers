@@ -78,7 +78,7 @@ func web(ctx context.Context, config oidch.Config) error {
 	}
 	http.HandleFunc("/auth", oidc.RedirectHandler)
 	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
-	http.HandleFunc("/logout", oidc.Logout)
+	http.HandleFunc("/logout", oidc.LogoutHandler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := oidc.Refresh(w, r); err != nil {
 			logrus.Error(err)
