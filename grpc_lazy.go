@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"go.linka.cloud/go-oidc/v3/oidc"
 	"google.golang.org/grpc"
 )
 

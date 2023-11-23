@@ -19,7 +19,7 @@ package oidc_handlers
 import (
 	"context"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"go.linka.cloud/go-oidc/v3/oidc"
 )
 
 type claimsCtx struct{}

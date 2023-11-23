@@ -20,8 +20,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/sirupsen/logrus"
+	"go.linka.cloud/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

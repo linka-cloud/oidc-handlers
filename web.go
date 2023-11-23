@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/sirupsen/logrus"
+	"go.linka.cloud/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
 
