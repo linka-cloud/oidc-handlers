@@ -100,7 +100,7 @@ func (l *lazyWebHandler) Middleware(authPath string) func(r http.Handler) http.H
 			mu.RUnlock()
 			return mldw, true
 		}
-		mu.Unlock()
+		mu.RUnlock()
 		h, err := l.handler()
 		if err != nil {
 			return nil, false
