@@ -18,8 +18,6 @@ package oidc_handlers
 
 import (
 	"context"
-
-	"go.linka.cloud/go-oidc/v3/oidc"
 )
 
 type claimsCtx struct{}
@@ -27,18 +25,14 @@ type idTokenCtx struct{}
 
 type rawIDTokenCtx struct{}
 
-func setClaims(ctx context.Context, idToken *oidc.IDToken) context.Context {
-	if idToken == nil {
+func withToken(ctx context.Context, tk *Token) context.Context {
+	if tk == nil {
 		return ctx
 	}
-	var claims Claims
-	if err := idToken.Claims(&claims); err != nil {
-		return ctx
-	}
-	return contextWithClaims(ctx, claims)
+	return withIDToken(withClaims(ctx, tk.claims()), tk)
 }
 
-func contextWithClaims(ctx context.Context, claims Claims) context.Context {
+func withClaims(ctx context.Context, claims Claims) context.Context {
 	return context.WithValue(ctx, claimsCtx{}, claims)
 }
 
@@ -47,19 +41,19 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 	return v, ok
 }
 
-func contextWithIDToken(ctx context.Context, idToken *oidc.IDToken) context.Context {
-	if idToken == nil {
+func withIDToken(ctx context.Context, tk *Token) context.Context {
+	if tk == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, idTokenCtx{}, *idToken)
+	return context.WithValue(ctx, idTokenCtx{}, *tk)
 }
 
-func IDTokenFromContext(ctx context.Context) (oidc.IDToken, bool) {
-	v, ok := ctx.Value(idTokenCtx{}).(oidc.IDToken)
+func IDTokenFromContext(ctx context.Context) (Token, bool) {
+	v, ok := ctx.Value(idTokenCtx{}).(Token)
 	return v, ok
 }
 
-func contextWithRawIDToken(ctx context.Context, rawIDToken string) context.Context {
+func withRawIDToken(ctx context.Context, rawIDToken string) context.Context {
 	return context.WithValue(ctx, rawIDTokenCtx{}, rawIDToken)
 }
 
@@ -68,6 +62,6 @@ func RawIDTokenFromContext(ctx context.Context) (string, bool) {
 	return v, ok
 }
 
-func oidcContext(ctx context.Context, idToken *oidc.IDToken, rawIDToken string) context.Context {
-	return contextWithRawIDToken(contextWithIDToken(setClaims(ctx, idToken), idToken), rawIDToken)
+func oidcContext(ctx context.Context, tk *Token, rawIDToken string) context.Context {
+	return withRawIDToken(withToken(ctx, tk), rawIDToken)
 }

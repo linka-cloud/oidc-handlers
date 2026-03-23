@@ -17,22 +17,20 @@
 package oidc_handlers
 
 import (
-	"math/rand"
-	"time"
+	"crypto/rand"
 )
-
-func init() {
-	rand.Seed(time.Now().Unix())
-}
 
 var (
 	nouns = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
-func newState() string {
-	var state string
-	for i := 0; i < 32; i++ {
-		state += string(nouns[rand.Int()%len(nouns)])
+func newStateWithErr() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	return state
+	for i := range b {
+		b[i] = nouns[int(b[i])%len(nouns)]
+	}
+	return string(b), nil
 }

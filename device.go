@@ -24,7 +24,7 @@ import (
 	"net/http"
 
 	"github.com/sirupsen/logrus"
-	"go.linka.cloud/go-oidc/v3/oidc"
+	"github.com/zitadel/oidc/v3/pkg/client/rp"
 	"golang.org/x/oauth2"
 )
 
@@ -34,62 +34,82 @@ var (
 
 type DeviceHandler interface {
 	Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error)
-	Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
-	Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken, refreshToken string) error
+	Refresh(ctx context.Context, token *Token, refresh string) (tk *Token, rawIDToken, refreshToken string, err error)
+	Logout(ctx context.Context, tk *Token, rawIDToken, refreshToken string) error
 }
 
 type deviceHandler struct {
-	oauth oauth2.Config
-
-	verifier   *oidc.IDTokenVerifier
-	log        logrus.FieldLogger
-	endSession string
+	rp  rp.RelyingParty
+	log logrus.FieldLogger
 }
 
 func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error) {
-	opts = append(opts, oauth2.SetAuthURLParam("client_secret", d.oauth.ClientSecret))
-	a, err := d.oauth.DeviceAuth(ctx, opts...)
+	oauth := d.rp.OAuthConfig()
+	opts = append(opts, oauth2.SetAuthURLParam("client_secret", oauth.ClientSecret))
+	a, err := oauth.DeviceAuth(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return &deviceVerifier{d: d, a: a}, nil
 }
 
-func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
+func (d *deviceHandler) Refresh(ctx context.Context, token *Token, refresh string) (tk *Token, rawIDToken, refreshToken string, err error) {
+	return d.refresh(ctx, token, refresh, false)
+}
+
+func (d *deviceHandler) refresh(ctx context.Context, token *Token, refresh string, allowMissingIDToken bool) (tk *Token, rawIDToken, refreshToken string, err error) {
 	d.log.Info("refreshing token")
-	tks := d.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh, Expiry: token.Expiry})
-	oauth2Token, err := tks.Token()
+	tks, err := rp.RefreshTokens[*Token](ctx, d.rp, refresh, "", "")
 	if err != nil {
 		d.log.WithError(err).Error("refresh token")
 		return nil, "", "", err
 	}
-	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
-	if !ok {
-		d.log.Error("id_token not found")
-		return nil, "", "", errors.New("id_token not found")
+
+	refreshToken = pickRefresh(tks.RefreshToken, refresh)
+
+	rawIDToken = tks.IDToken
+	if rawIDToken == "" {
+		if !allowMissingIDToken {
+			d.log.Error("id_token not found")
+			return nil, "", "", errors.New("id_token not found")
+		}
+		d.log.Warn("refresh response missing id_token")
+		return token, "", refreshToken, nil
 	}
-	tk, err = d.verifier.Verify(ctx, rawIDToken)
-	if err != nil {
-		d.log.WithError(err).Error("verify token")
-		return nil, "", "", fmt.Errorf("verify token: %w", err)
+
+	tk = tks.IDTokenClaims
+	if tk == nil {
+		d.log.Error("id_token claims not found")
+		return nil, "", "", errors.New("id_token claims not found")
 	}
+
 	d.log.Info("token refreshed")
-	return tk, rawIDToken, oauth2Token.RefreshToken, nil
+	return tk, rawIDToken, refreshToken, nil
 }
 
-func (d *deviceHandler) Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken, refreshToken string) error {
-	if d.endSession == "" {
+func (d *deviceHandler) Logout(ctx context.Context, tk *Token, rawIDToken, refreshToken string) error {
+	if d.rp.GetEndSessionEndpoint() == "" {
 		return nil
 	}
-	_, rawIDToken, _, err := d.Refresh(ctx, tk, refreshToken)
+	_, refreshedIDToken, _, err := d.refresh(ctx, tk, refreshToken, true)
 	if err != nil {
 		return fmt.Errorf("refresh token: %w", err)
 	}
-	u, err := logoutURI(d.endSession, rawIDToken)
+	if refreshedIDToken != "" {
+		rawIDToken = refreshedIDToken
+	}
+	if rawIDToken == "" {
+		return errors.New("id_token not found")
+	}
+	endSession, err := logoutURI(d.rp.GetEndSessionEndpoint(), rawIDToken)
 	if err != nil {
 		return fmt.Errorf("end session url: %v", err)
 	}
-	res, err := http.Get(u)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endSession, nil)
+	if err != nil {
+		return err
+	}
+	res, err := d.rp.HttpClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -103,7 +123,7 @@ func (d *deviceHandler) Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken
 
 type DeviceVerifier interface {
 	URI() string
-	Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error)
+	Verify(ctx context.Context) (tk *Token, rawIDToken, refreshToken string, err error)
 }
 
 type deviceVerifier struct {
@@ -118,8 +138,8 @@ func (v *deviceVerifier) URI() string {
 	return v.a.VerificationURI
 }
 
-func (v *deviceVerifier) Verify(ctx context.Context) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
-	oauth2Token, err := v.d.oauth.DeviceAccessToken(ctx, v.a)
+func (v *deviceVerifier) Verify(ctx context.Context) (tk *Token, rawIDToken, refreshToken string, err error) {
+	oauth2Token, err := v.d.rp.OAuthConfig().DeviceAccessToken(ctx, v.a)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -127,8 +147,10 @@ func (v *deviceVerifier) Verify(ctx context.Context) (tk *oidc.IDToken, rawIDTok
 	if !ok {
 		return nil, "", "", errors.New("id_token not found")
 	}
-
-	tk, err = v.d.verifier.Verify(ctx, rawIDToken)
+	if rawIDToken == "" {
+		return nil, "", "", errors.New("id_token not found")
+	}
+	tk, err = rp.VerifyTokens[*Token](ctx, oauth2Token.AccessToken, rawIDToken, v.d.rp.IDTokenVerifier())
 	if err != nil {
 		return nil, "", "", err
 	}

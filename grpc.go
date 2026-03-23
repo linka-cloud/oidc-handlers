@@ -21,8 +21,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
-	"go.linka.cloud/go-oidc/v3/oidc"
-	"golang.org/x/oauth2"
+	"github.com/zitadel/oidc/v3/pkg/client/rp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -41,14 +40,12 @@ var (
 type GRPCHandler interface {
 	UnaryServerInterceptor() grpc.UnaryServerInterceptor
 	StreamServerInterceptor() grpc.StreamServerInterceptor
-	Verify(ctx context.Context) (*oidc.IDToken, string, error)
+	Verify(ctx context.Context) (*Token, string, error)
 }
 
 type grpcHandler struct {
-	oauth oauth2.Config
-
-	verifier *oidc.IDTokenVerifier
-	log      logrus.FieldLogger
+	rp  rp.RelyingParty
+	log logrus.FieldLogger
 }
 
 func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
@@ -77,24 +74,29 @@ func (g *grpcHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	}
 }
 
-func (g *grpcHandler) Verify(ctx context.Context) (*oidc.IDToken, string, error) {
+func (g *grpcHandler) Verify(ctx context.Context) (*Token, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, "", status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, "", unauth("no id token found in metadata")
 	}
 	a := md.Get("authorization")
 	if len(a) < 1 {
-		return nil, "", status.Error(codes.Unauthenticated, "no id token found in metadata")
+		return nil, "", unauth("no id token found in metadata")
 	}
 	if !strings.HasPrefix(strings.ToLower(a[0]), "bearer ") {
-		return nil, "", status.Error(codes.Unauthenticated, "id token authorization must have the be 'Bearer [ID TOKEN]")
+		return nil, "", unauth("authorization must be 'Bearer [ID TOKEN]'")
 	}
 	raw := a[0][7:]
-	idToken, err := g.verifier.Verify(ctx, raw)
+	idToken, err := rp.VerifyIDToken[*Token](ctx, raw, g.rp.IDTokenVerifier())
 	if err != nil {
-		return nil, "", status.Error(codes.Unauthenticated, err.Error())
+		g.log.WithError(err).Warn("verify id token")
+		return nil, "", status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 	return idToken, raw, nil
+}
+
+func unauth(msg string) error {
+	return status.Error(codes.Unauthenticated, msg)
 }
 
 type sswrap struct {

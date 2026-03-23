@@ -33,36 +33,32 @@ type lazyWebHandler struct {
 }
 
 func (l *lazyWebHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
-		http.Error(w, "", http.StatusServiceUnavailable)
 		return
 	}
 	h.LoginHandler(w, r)
 }
 
 func (l *lazyWebHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
-		http.Error(w, "", http.StatusServiceUnavailable)
 		return
 	}
 	h.RedirectHandler(w, r)
 }
 
 func (l *lazyWebHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
-		http.Error(w, "", http.StatusServiceUnavailable)
 		return
 	}
 	h.CallbackHandler(w, r)
 }
 
 func (l *lazyWebHandler) Callback(w http.ResponseWriter, r *http.Request) error {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
-		http.Error(w, "", http.StatusServiceUnavailable)
 		return err
 	}
 	return h.Callback(w, r)
@@ -77,9 +73,8 @@ func (l *lazyWebHandler) Refresh(w http.ResponseWriter, r *http.Request) (idToke
 }
 
 func (l *lazyWebHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
-		http.Error(w, "", http.StatusServiceUnavailable)
 		return
 	}
 	h.LogoutHandler(w, r)
@@ -122,7 +117,7 @@ func (l *lazyWebHandler) Middleware(authPath string) func(r http.Handler) http.H
 }
 
 func (l *lazyWebHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
 		return
 	}
@@ -130,11 +125,20 @@ func (l *lazyWebHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
 }
 
 func (l *lazyWebHandler) CleanCookies(w http.ResponseWriter) {
-	h, err := l.handler()
+	h, err := l.handlerOr503(w)
 	if err != nil {
 		return
 	}
 	h.CleanCookies(w)
+}
+
+func (l *lazyWebHandler) handlerOr503(w http.ResponseWriter) (WebHandler, error) {
+	h, err := l.handler()
+	if err == nil {
+		return h, nil
+	}
+	http.Error(w, "", http.StatusServiceUnavailable)
+	return nil, err
 }
 
 func (l *lazyWebHandler) handler() (WebHandler, error) {
@@ -144,8 +148,13 @@ func (l *lazyWebHandler) handler() (WebHandler, error) {
 		return l.h, nil
 	}
 	l.mu.RUnlock()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.h != nil {
+		return l.h, nil
+	}
+
 	var err error
 	if l.h, err = l.config.WebHandler(l.ctx); err != nil {
 		l.log.WithError(err).Error("handler init failed")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"go.linka.cloud/go-oidc/v3/oidc"
 	"google.golang.org/grpc"
 )
 
@@ -35,7 +34,7 @@ func (l *lazyGRPCHandler) StreamServerInterceptor() grpc.StreamServerInterceptor
 	}
 }
 
-func (l *lazyGRPCHandler) Verify(ctx context.Context) (*oidc.IDToken, string, error) {
+func (l *lazyGRPCHandler) Verify(ctx context.Context) (*Token, string, error) {
 	h, err := l.handler()
 	if err != nil {
 		return nil, "", err
@@ -50,8 +49,13 @@ func (l *lazyGRPCHandler) handler() (GRPCHandler, error) {
 		return l.h, nil
 	}
 	l.mu.RUnlock()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.h != nil {
+		return l.h, nil
+	}
+
 	var err error
 	l.h, err = l.config.GRPC(l.ctx)
 	if err != nil {

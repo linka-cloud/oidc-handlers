@@ -25,7 +25,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/securecookie"
 	"github.com/sirupsen/logrus"
-	"go.linka.cloud/go-oidc/v3/oidc"
+	"github.com/zitadel/oidc/v3/pkg/client/rp"
+	oidc "github.com/zitadel/oidc/v3/pkg/oidc"
 	"golang.org/x/oauth2"
 )
 
@@ -94,76 +95,64 @@ func (c *Config) Defaults() {
 	}
 	if c.Opts == nil {
 		c.Opts = func(ctx context.Context) []oauth2.AuthCodeOption {
-			return []oauth2.AuthCodeOption{oidc.Nonce(uuid.New().String())}
+			return []oauth2.AuthCodeOption{oauth2.SetAuthURLParam("nonce", uuid.New().String())}
 		}
 	}
 }
 
-func (c *Config) apply(ctx context.Context) (oauth2.Config, *oidc.IDTokenVerifier, string, error) {
+func (c *Config) newRP(ctx context.Context) (rp.RelyingParty, error) {
 	c.Defaults()
-	provider, err := oidc.NewProvider(ctx, c.IssuerURL)
+	r, err := rp.NewRelyingPartyOIDC(ctx, c.IssuerURL, c.ClientID, c.ClientSecret, c.OauthCallback, c.Scopes)
 	if err != nil {
-		return oauth2.Config{}, nil, "", err
+		return nil, err
 	}
-	// Configure an OpenID Connect aware OAuth2 client.
-	oauth2Config := oauth2.Config{
-		ClientID:     c.ClientID,
-		ClientSecret: c.ClientSecret,
-		RedirectURL:  c.OauthCallback,
-		Endpoint:     provider.Endpoint(),
-		Scopes:       c.Scopes,
-	}
-	verifier := provider.Verifier(&oidc.Config{ClientID: c.ClientID, SkipExpiryCheck: true, Now: now})
-	return oauth2Config, verifier, provider.EndSessionURL(), nil
+	return r, nil
 }
 
 // WebHandler creates a web auth flow handler from config
 func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
-	oauth2Config, verifier, endSession, err := c.apply(ctx)
+	rp, err := c.newRP(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &webHandler{
 		cookieConfig: c.CookieConfig,
-		oauth:        oauth2Config,
-		verifier:     verifier,
+		rp:           rp,
 		now:          now,
 		log:          c.Logger.WithField("oidc", "web"),
 		opts:         c.Opts,
-		endSession:   endSession,
 	}, nil
 }
 
 func (c *Config) LazyWebHandler(ctx context.Context) (WebHandler, error) {
+	c.Defaults()
 	return &lazyWebHandler{ctx: ctx, log: c.Logger.WithField("service", "oidcHandlers"), config: c}, nil
 }
 
 func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
-	oauth2Config, verifier, endSession, err := c.apply(ctx)
+	rp, err := c.newRP(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &deviceHandler{
-		oauth:      oauth2Config,
-		verifier:   verifier,
-		log:        c.Logger.WithField("oidc", "device"),
-		endSession: endSession,
+		rp:  rp,
+		log: c.Logger.WithField("oidc", "device"),
 	}, nil
 }
 
 func (c *Config) GRPC(ctx context.Context) (GRPCHandler, error) {
-	oauth2Config, verifier, _, err := c.apply(ctx)
+	rp, err := c.newRP(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &grpcHandler{
-		oauth:    oauth2Config,
-		verifier: verifier,
-		log:      c.Logger.WithField("oidc", "grpc"),
+		rp:  rp,
+		log: c.Logger.WithField("oidc", "grpc"),
 	}, nil
 }
 
 func (c *Config) LazyGRPCHandler(ctx context.Context) (GRPCHandler, error) {
+	c.Defaults()
 	return &lazyGRPCHandler{
 		ctx:    ctx,
 		config: c,
