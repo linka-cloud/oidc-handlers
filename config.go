@@ -19,12 +19,10 @@ package oidc_handlers
 import (
 	"context"
 	"crypto/sha256"
-	"io"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/securecookie"
-	"github.com/sirupsen/logrus"
 	"github.com/zitadel/oidc/v3/pkg/client/rp"
 	oidc "github.com/zitadel/oidc/v3/pkg/oidc"
 	"golang.org/x/oauth2"
@@ -79,7 +77,6 @@ type Config struct {
 	OauthCallback string
 	CookieConfig  CookieConfig
 	Scopes        []string
-	Logger        logrus.FieldLogger
 	Opts          func(ctx context.Context) []oauth2.AuthCodeOption
 }
 
@@ -87,11 +84,6 @@ func (c *Config) Defaults() {
 	c.CookieConfig.Defaults()
 	if len(c.Scopes) == 0 {
 		c.Scopes = []string{oidc.ScopeOpenID, oidc.ScopeOfflineAccess, "profile", "email", "groups"}
-	}
-	if c.Logger == nil {
-		log := logrus.New()
-		log.SetOutput(io.Discard)
-		c.Logger = log
 	}
 	if c.Opts == nil {
 		c.Opts = func(ctx context.Context) []oauth2.AuthCodeOption {
@@ -119,14 +111,13 @@ func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
 		cookieConfig: c.CookieConfig,
 		rp:           rp,
 		now:          now,
-		log:          c.Logger.WithField("oidc", "web"),
 		opts:         c.Opts,
 	}, nil
 }
 
 func (c *Config) LazyWebHandler(ctx context.Context) (WebHandler, error) {
 	c.Defaults()
-	return &lazyWebHandler{ctx: ctx, log: c.Logger.WithField("service", "oidcHandlers"), config: c}, nil
+	return &lazyWebHandler{ctx: ctx, config: c}, nil
 }
 
 func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
@@ -135,8 +126,7 @@ func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {
 		return nil, err
 	}
 	return &deviceHandler{
-		rp:  rp,
-		log: c.Logger.WithField("oidc", "device"),
+		rp: rp,
 	}, nil
 }
 
@@ -146,8 +136,7 @@ func (c *Config) GRPC(ctx context.Context) (GRPCHandler, error) {
 		return nil, err
 	}
 	return &grpcHandler{
-		rp:  rp,
-		log: c.Logger.WithField("oidc", "grpc"),
+		rp: rp,
 	}, nil
 }
 

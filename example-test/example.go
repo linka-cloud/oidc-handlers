@@ -22,8 +22,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
+	"go.linka.cloud/grpc-toolkit/logger"
 	oidch "go.linka.cloud/oidc-handlers"
 )
 
@@ -45,12 +44,12 @@ func main() {
 	go func() {
 		// Perform single device auth flow
 		if err := device(devCtx, config); err != nil {
-			logrus.Error(err)
+			logger.C(devCtx).WithError(err).Error("device flow failed")
 		}
 	}()
 	// Start web app
 	if err := web(ctx, config); err != nil {
-		logrus.Fatal(err)
+		logger.C(ctx).WithError(err).Fatal("web server failed")
 	}
 }
 
@@ -63,11 +62,11 @@ func device(ctx context.Context, config oidch.Config) error {
 	if err != nil {
 		return err
 	}
-	logrus.Infof("Please visit %s to authenticate", v.URI())
+	logger.C(ctx).Infof("Please visit %s to authenticate", v.URI())
 	if _, _, _, err := v.Verify(ctx); err != nil {
 		return err
 	}
-	logrus.Infof("Device authentication succeed")
+	logger.C(ctx).Info("Device authentication succeed")
 	return nil
 }
 
@@ -90,10 +89,10 @@ func web(ctx context.Context, config oidch.Config) error {
 	})
 	lm := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logrus.WithFields(logrus.Fields{"path": r.URL.Path, "method": r.Method, "remote": r.RemoteAddr}).Info("new request")
+			logger.C(r.Context()).WithFields("path", r.URL.Path, "method", r.Method, "remote", r.RemoteAddr).Info("new request")
 			next.ServeHTTP(w, r)
 		})
 	}
-	logrus.Info("Starting web server at http://app.oidc.test:8888")
+	logger.C(ctx).Info("Starting web server at http://app.oidc.test:8888")
 	return http.ListenAndServe(":8888", lm(oidc.Middleware("/auth")(mux)))
 }

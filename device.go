@@ -23,8 +23,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sirupsen/logrus"
 	"github.com/zitadel/oidc/v3/pkg/client/rp"
+	"go.linka.cloud/grpc-toolkit/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -39,8 +39,7 @@ type DeviceHandler interface {
 }
 
 type deviceHandler struct {
-	rp  rp.RelyingParty
-	log logrus.FieldLogger
+	rp rp.RelyingParty
 }
 
 func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error) {
@@ -58,10 +57,11 @@ func (d *deviceHandler) Refresh(ctx context.Context, token *Token, refresh strin
 }
 
 func (d *deviceHandler) refresh(ctx context.Context, token *Token, refresh string, allowMissingIDToken bool) (tk *Token, rawIDToken, refreshToken string, err error) {
-	d.log.Info("refreshing token")
+	log := logger.C(ctx).WithField("oidc", "device")
+	log.Info("refreshing token")
 	tks, err := rp.RefreshTokens[*Token](ctx, d.rp, refresh, "", "")
 	if err != nil {
-		d.log.WithError(err).Error("refresh token")
+		log.WithError(err).Error("refresh token")
 		return nil, "", "", err
 	}
 
@@ -70,20 +70,20 @@ func (d *deviceHandler) refresh(ctx context.Context, token *Token, refresh strin
 	rawIDToken = tks.IDToken
 	if rawIDToken == "" {
 		if !allowMissingIDToken {
-			d.log.Error("id_token not found")
+			log.Error("id_token not found")
 			return nil, "", "", errors.New("id_token not found")
 		}
-		d.log.Warn("refresh response missing id_token")
+		log.Warn("refresh response missing id_token")
 		return token, "", refreshToken, nil
 	}
 
 	tk = tks.IDTokenClaims
 	if tk == nil {
-		d.log.Error("id_token claims not found")
+		log.Error("id_token claims not found")
 		return nil, "", "", errors.New("id_token claims not found")
 	}
 
-	d.log.Info("token refreshed")
+	log.Info("token refreshed")
 	return tk, rawIDToken, refreshToken, nil
 }
 

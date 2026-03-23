@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/zitadel/oidc/v3/pkg/client/rp"
+	"go.linka.cloud/grpc-toolkit/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -61,7 +61,6 @@ func New(ctx context.Context, config Config) (Handler, error) {
 		cookieConfig: config.CookieConfig,
 		rp:           rp,
 		now:          now,
-		log:          config.Logger,
 		opts:         config.Opts,
 	}
 	return h, nil
@@ -70,8 +69,7 @@ func New(ctx context.Context, config Config) (Handler, error) {
 type webHandler struct {
 	cookieConfig CookieConfig
 
-	rp  rp.RelyingParty
-	log logrus.FieldLogger
+	rp rp.RelyingParty
 
 	now func() time.Time
 
@@ -157,7 +155,7 @@ func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
 
 func (h *webHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.Callback(w, r); err != nil {
-		h.log.WithError(err).Warn("callback failed")
+		logger.C(r.Context()).WithField("oidc", "web").WithError(err).Warn("callback failed")
 		http.Error(w, "bad request", http.StatusBadRequest)
 	}
 }
@@ -331,6 +329,6 @@ func cleanRedirect(path string) string {
 	return path
 }
 
-func (h *webHandler) logReq(r *http.Request) *logrus.Entry {
-	return h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+func (h *webHandler) logReq(r *http.Request) logger.Logger {
+	return logger.C(r.Context()).WithField("oidc", "web").WithField("path", r.URL.Path).WithField("method", r.Method)
 }

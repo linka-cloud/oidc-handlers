@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -101,7 +100,6 @@ func TestCallbackRejectsInvalidState(t *testing.T) {
 	c.Defaults()
 	h := &webHandler{
 		cookieConfig: c,
-		log:          logrus.New(),
 		opts:         func(context.Context) []oauth2.AuthCodeOption { return nil },
 	}
 	w := httptest.NewRecorder()
@@ -124,7 +122,6 @@ func TestCallbackHandlerHidesInternalError(t *testing.T) {
 	c.Defaults()
 	h := &webHandler{
 		cookieConfig: c,
-		log:          logrus.New(),
 		opts:         func(context.Context) []oauth2.AuthCodeOption { return nil },
 	}
 	w := httptest.NewRecorder()
@@ -163,7 +160,7 @@ func TestHandleOauthTokenRejectsMissingIDToken(t *testing.T) {
 func TestGRPCVerifyRejectsInvalidAuthorization(t *testing.T) {
 	t.Parallel()
 
-	h := &grpcHandler{log: logrus.New()}
+	h := &grpcHandler{}
 	tests := []struct {
 		name string
 		ctx  context.Context
