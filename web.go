@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"go.linka.cloud/go-oidc/v3/oidc"
+	"go.linka.cloud/grpc-toolkit/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -63,7 +63,6 @@ func New(ctx context.Context, config Config) (Handler, error) {
 		oauth:        oauth2Config,
 		verifier:     verifier,
 		now:          now,
-		log:          config.Logger,
 		endSession:   endSession,
 	}
 	return h, nil
@@ -74,13 +73,16 @@ type webHandler struct {
 	cookieConfig CookieConfig
 
 	verifier *oidc.IDTokenVerifier
-	log      logrus.FieldLogger
 
 	now func() time.Time
 	mu  sync.RWMutex
 
 	opts       func(ctx context.Context) []oauth2.AuthCodeOption
 	endSession string
+}
+
+func (h *webHandler) log(ctx context.Context) logger.Logger {
+	return logger.C(ctx).WithField("oidc", "web")
 }
 
 func (h *webHandler) SetRedirectCookie(w http.ResponseWriter, path string) {
@@ -125,7 +127,7 @@ func (h *webHandler) Middleware(authPath string) func(r http.Handler) http.Handl
 }
 
 func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
-	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log := h.log(r.Context()).WithField("path", r.URL.Path).WithField("method", r.Method)
 	log.Info("redirect")
 	h.ensureCookieDomain(r)
 	state := newState()
@@ -134,7 +136,7 @@ func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *webHandler) Callback(w http.ResponseWriter, r *http.Request) error {
-	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log := h.log(r.Context()).WithField("path", r.URL.Path).WithField("method", r.Method)
 	log.Info("callback")
 	stateCookie, err := h.cookie(r, h.cookieConfig.AuthStateName)
 	if err != nil {
@@ -170,7 +172,7 @@ func (h *webHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, error) {
-	log := h.log.WithField("path", r.URL.Path).WithField("method", r.Method)
+	log := h.log(r.Context()).WithField("path", r.URL.Path).WithField("method", r.Method)
 	log.Info("refresh")
 	h.ensureCookieDomain(r)
 	idCookie, err := h.cookie(r, h.cookieConfig.IDTokenName)
@@ -215,8 +217,9 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 }
 
 func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	log := h.log(r.Context()).WithField("path", r.URL.Path).WithField("method", r.Method)
 	if _, err := h.Refresh(w, r); err != nil {
-		logrus.Error(err)
+		log.WithError(err).Error("refresh")
 		h.CleanCookies(w)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -228,13 +231,15 @@ func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := RawIDTokenFromContext(r.Context())
 	if !ok {
-		logrus.Errorf("token refreshed but raw id token not in context")
+		log.Error("token refreshed but raw id token not in context")
 		http.Error(w, "", http.StatusInternalServerError)
+		return
 	}
 	u, err := logoutURI(h.endSession, id)
 	if err != nil {
-		logrus.Errorf("end session url: %v", err)
+		log.WithError(err).Error("end session url")
 		http.Error(w, "", http.StatusInternalServerError)
+		return
 	}
 	http.Redirect(w, r, u, http.StatusSeeOther)
 }

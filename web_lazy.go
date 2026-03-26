@@ -21,12 +21,11 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	"go.linka.cloud/grpc-toolkit/logger"
 )
 
 type lazyWebHandler struct {
 	ctx    context.Context
-	log    logrus.FieldLogger
 	config *Config
 	h      WebHandler
 	mu     sync.RWMutex
@@ -148,7 +147,7 @@ func (l *lazyWebHandler) handler() (WebHandler, error) {
 	defer l.mu.Unlock()
 	var err error
 	if l.h, err = l.config.WebHandler(l.ctx); err != nil {
-		l.log.WithError(err).Error("handler init failed")
+		logger.C(l.ctx).WithField("oidc", "web").WithError(err).Error("handler init failed")
 	}
 	return l.h, err
 }

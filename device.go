@@ -23,8 +23,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sirupsen/logrus"
 	"go.linka.cloud/go-oidc/v3/oidc"
+	"go.linka.cloud/grpc-toolkit/logger"
 	"golang.org/x/oauth2"
 )
 
@@ -42,8 +42,11 @@ type deviceHandler struct {
 	oauth oauth2.Config
 
 	verifier   *oidc.IDTokenVerifier
-	log        logrus.FieldLogger
 	endSession string
+}
+
+func (d *deviceHandler) log(ctx context.Context) logger.Logger {
+	return logger.C(ctx).WithField("oidc", "device")
 }
 
 func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOption) (DeviceVerifier, error) {
@@ -56,24 +59,25 @@ func (d *deviceHandler) Exchange(ctx context.Context, opts ...oauth2.AuthCodeOpt
 }
 
 func (d *deviceHandler) Refresh(ctx context.Context, token *oidc.IDToken, refresh string) (tk *oidc.IDToken, rawIDToken, refreshToken string, err error) {
-	d.log.Info("refreshing token")
+	log := d.log(ctx)
+	log.Info("refreshing token")
 	tks := d.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh, Expiry: token.Expiry})
 	oauth2Token, err := tks.Token()
 	if err != nil {
-		d.log.WithError(err).Error("refresh token")
+		log.WithError(err).Error("refresh token")
 		return nil, "", "", err
 	}
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		d.log.Error("id_token not found")
+		log.Error("id_token not found")
 		return nil, "", "", errors.New("id_token not found")
 	}
 	tk, err = d.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		d.log.WithError(err).Error("verify token")
+		log.WithError(err).Error("verify token")
 		return nil, "", "", fmt.Errorf("verify token: %w", err)
 	}
-	d.log.Info("token refreshed")
+	log.Info("token refreshed")
 	return tk, rawIDToken, oauth2Token.RefreshToken, nil
 }
 

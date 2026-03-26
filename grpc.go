@@ -20,8 +20,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	"go.linka.cloud/go-oidc/v3/oidc"
+	"go.linka.cloud/grpc-toolkit/logger"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -48,12 +48,15 @@ type grpcHandler struct {
 	oauth oauth2.Config
 
 	verifier *oidc.IDTokenVerifier
-	log      logrus.FieldLogger
+}
+
+func (g *grpcHandler) log(ctx context.Context) logger.Logger {
+	return logger.C(ctx).WithField("oidc", "grpc")
 }
 
 func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		log := g.log.WithField("method", info.FullMethod)
+		log := g.log(ctx).WithField("method", info.FullMethod)
 		tk, raw, err := g.Verify(ctx)
 		if err != nil {
 			log.WithError(err).Error("token validation failed")
@@ -66,7 +69,7 @@ func (g *grpcHandler) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 func (g *grpcHandler) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		log := g.log.WithField("method", info.FullMethod)
+		log := g.log(ss.Context()).WithField("method", info.FullMethod)
 		tk, raw, err := g.Verify(ss.Context())
 		if err != nil {
 			log.WithError(err).Error("token validation failed")
