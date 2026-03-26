@@ -89,7 +89,7 @@ func (d *deviceHandler) Logout(ctx context.Context, tk *oidc.IDToken, rawIDToken
 	if err != nil {
 		return fmt.Errorf("refresh token: %w", err)
 	}
-	u, err := logoutURI(d.endSession, rawIDToken)
+	u, err := logoutURI(d.endSession, rawIDToken, "")
 	if err != nil {
 		return fmt.Errorf("end session url: %v", err)
 	}

@@ -71,14 +71,11 @@ func device(ctx context.Context, config oidch.Config) error {
 }
 
 func web(ctx context.Context, config oidch.Config) error {
-	oidc, err := config.WebHandler(ctx)
+	oidc, err := config.WebMiddleware(ctx, oidch.Endpoints{})
 	if err != nil {
 		return err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth", oidc.RedirectHandler)
-	mux.HandleFunc("/auth/callback", oidc.CallbackHandler)
-	mux.HandleFunc("/logout", oidc.LogoutHandler)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		c, ok := oidch.ClaimsFromContext(r.Context())
 		if !ok {
@@ -94,5 +91,5 @@ func web(ctx context.Context, config oidch.Config) error {
 		})
 	}
 	logger.C(ctx).Info("Starting web server at http://app.oidc.test:8888")
-	return http.ListenAndServe(":8888", lm(oidc.Middleware("/auth")(mux)))
+	return http.ListenAndServe(":8888", lm(oidc(mux)))
 }

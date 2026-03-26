@@ -66,19 +66,11 @@ func device(ctx context.Context, config oidch.Config) error {
 }
 
 func web(ctx context.Context, config oidch.Config) error {
-	oidc, err := config.WebHandler(ctx)
+	middleware, err := config.WebMiddleware(ctx, oidch.Endpoints{})
 	if err != nil {
 		return err
 	}
-	http.HandleFunc("/auth", oidc.RedirectHandler)
-	http.HandleFunc("/auth/callback", oidc.CallbackHandler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := oidc.Refresh(w, r); err != nil {
-			logrus.Error(err)
-			oidc.SetRedirectCookie(w, "/")
-			http.Redirect(w, r, "/auth", http.StatusSeeOther)
-			return
-		}
 		c, ok := oidch.ClaimsFromContext(r.Context())
 		if !ok {
 			http.Error(w, "no claims found", http.StatusInternalServerError)
@@ -93,7 +85,7 @@ func web(ctx context.Context, config oidch.Config) error {
 		})
 	}
 	logrus.Info("Starting web server at http://example.localhost:8888")
-	return http.ListenAndServe(":8888", lm(http.DefaultServeMux))
+	return http.ListenAndServe(":8888", lm(middleware(http.DefaultServeMux)))
 }
 
 ```
@@ -101,3 +93,5 @@ func web(ctx context.Context, config oidch.Config) error {
 Application is available at http://example.localhost:8888
 **Email**: admin@example.com
 **Password**: password
+
+Use `Endpoints` to customize the exact middleware-managed OIDC endpoints (`Login`, `Callback`, `Logout`) and the optional `PostLogoutRedirectURI`. Logout is best effort: cookies are always cleared, then the middleware redirects to the provider end-session endpoint when available or falls back to the configured post-logout redirect.

@@ -53,19 +53,7 @@ type WebHandler interface {
 
 // Deprecated: use Config.WebHandler instead
 func New(ctx context.Context, config Config) (Handler, error) {
-	config.Defaults()
-	oauth2Config, verifier, endSession, err := config.apply(ctx)
-	if err != nil {
-		return nil, err
-	}
-	h := &webHandler{
-		cookieConfig: config.CookieConfig,
-		oauth:        oauth2Config,
-		verifier:     verifier,
-		now:          now,
-		endSession:   endSession,
-	}
-	return h, nil
+	return config.webHandler(ctx)
 }
 
 type webHandler struct {
@@ -104,26 +92,67 @@ func (h *webHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *webHandler) Middleware(authPath string) func(r http.Handler) http.Handler {
+	return h.middleware(authPaths(authPath))
+}
+
+func (h *webHandler) webMiddleware(endpoints Endpoints) func(r http.Handler) http.Handler {
+	endpoints.Defaults()
+	return h.middleware(webPaths(endpoints))
+}
+
+type middlewarePaths struct {
+	login      string
+	callback   string
+	logout     string
+	postLogout string
+	redirect   func(r *http.Request) string
+}
+
+func authPaths(login string) middlewarePaths {
+	return middlewarePaths{login: login, redirect: requestPath}
+}
+
+func webPaths(endpoints Endpoints) middlewarePaths {
+	return middlewarePaths{
+		login:      endpoints.Login,
+		callback:   endpoints.Callback,
+		logout:     endpoints.Logout,
+		postLogout: endpoints.PostLogoutRedirectURI,
+		redirect:   requestURI,
+	}
+}
+
+func (h *webHandler) middleware(paths middlewarePaths) func(r http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, authPath) {
+			switch {
+			case paths.callback != "" && r.URL.Path == paths.callback:
+				h.CallbackHandler(w, r)
+			case paths.logout != "" && r.URL.Path == paths.logout:
+				h.logoutHandler(w, r, paths.postLogout)
+			case paths.login != "" && r.URL.Path == paths.login:
+				h.LoginHandler(w, r)
+			case paths.callback == "" && paths.logout == "" && strings.HasPrefix(r.URL.Path, paths.login):
 				next.ServeHTTP(w, r)
-				return
+			default:
+				h.serve(w, r, next, paths.login, paths.redirect(r))
 			}
-			if _, err := h.Refresh(w, r); err != nil {
-				h.SetRedirectCookie(w, r.URL.Path)
-				http.Redirect(w, r, authPath, http.StatusSeeOther)
-				return
-			}
-			// retrieve the id token and set it as authorization header for the next handlers
-			tk, ok := RawIDTokenFromContext(r.Context())
-			if !ok {
-				panic("token refreshed but raw id token not in context")
-			}
-			r.Header.Set("Authorization", "Bearer "+tk)
-			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (h *webHandler) serve(w http.ResponseWriter, r *http.Request, next http.Handler, login string, redirect string) {
+	if _, err := h.Refresh(w, r); err != nil {
+		h.SetRedirectCookie(w, redirect)
+		http.Redirect(w, r, login, http.StatusSeeOther)
+		return
+	}
+	tk, ok := RawIDTokenFromContext(r.Context())
+	if !ok {
+		panic("token refreshed but raw id token not in context")
+	}
+	r.Header.Set("Authorization", "Bearer "+tk)
+	next.ServeHTTP(w, r)
 }
 
 func (h *webHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
@@ -217,16 +246,20 @@ func (h *webHandler) Refresh(w http.ResponseWriter, r *http.Request) (string, er
 }
 
 func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	h.logoutHandler(w, r, "")
+}
+
+func (h *webHandler) logoutHandler(w http.ResponseWriter, r *http.Request, postLogoutRedirectURI string) {
 	log := h.log(r.Context()).WithField("path", r.URL.Path).WithField("method", r.Method)
 	if _, err := h.Refresh(w, r); err != nil {
 		log.WithError(err).Error("refresh")
 		h.CleanCookies(w)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		h.finishLogout(w, r, postLogoutRedirectURI)
 		return
 	}
 	h.CleanCookies(w)
 	if h.endSession == "" {
-		w.WriteHeader(http.StatusOK)
+		h.finishLogout(w, r, postLogoutRedirectURI)
 		return
 	}
 	id, ok := RawIDTokenFromContext(r.Context())
@@ -235,13 +268,21 @@ func (h *webHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	u, err := logoutURI(h.endSession, id)
+	u, err := logoutURI(h.endSession, id, postLogoutRedirectURI)
 	if err != nil {
 		log.WithError(err).Error("end session url")
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, u, http.StatusSeeOther)
+}
+
+func (h *webHandler) finishLogout(w http.ResponseWriter, r *http.Request, postLogoutRedirectURI string) {
+	if postLogoutRedirectURI != "" {
+		http.Redirect(w, r, postLogoutRedirectURI, http.StatusSeeOther)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *webHandler) handleOauthToken(ctx context.Context, w http.ResponseWriter, oauth2Token *oauth2.Token) (*oidc.IDToken, string, error) {
@@ -320,13 +361,27 @@ func (h *webHandler) ensureCookieDomain(r *http.Request) {
 	h.mu.Unlock()
 }
 
-func logoutURI(endSession string, rawIDToken string) (string, error) {
+func requestURI(r *http.Request) string {
+	if r.URL.RawQuery == "" {
+		return r.URL.Path
+	}
+	return r.URL.Path + "?" + r.URL.RawQuery
+}
+
+func requestPath(r *http.Request) string {
+	return r.URL.Path
+}
+
+func logoutURI(endSession string, rawIDToken string, postLogoutRedirectURI string) (string, error) {
 	u, err := url.Parse(endSession)
 	if err != nil {
 		return "", err
 	}
 	q := u.Query()
 	q.Set("id_token_hint", rawIDToken)
+	if postLogoutRedirectURI != "" {
+		q.Set("post_logout_redirect_uri", postLogoutRedirectURI)
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }

@@ -19,6 +19,7 @@ package oidc_handlers
 import (
 	"context"
 	"crypto/sha256"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,7 +35,34 @@ const (
 	DefaultRefreshTokenName = "refresh_token"
 	DefaultAuthStateName    = "auth_state"
 	DefaultRedirectName     = "redirect"
+	DefaultLoginEndpoint    = "/auth"
+	DefaultCallbackEndpoint = "/auth/callback"
+	DefaultLogoutEndpoint   = "/logout"
 )
+
+// Endpoints configures the exact application routes managed by WebMiddleware.
+//
+// Login, Callback, and Logout are matched as exact paths.
+// PostLogoutRedirectURI is forwarded to the provider when RP-initiated logout is available,
+// and is also used as a local fallback after cookies are cleared.
+type Endpoints struct {
+	Login                 string
+	Callback              string
+	Logout                string
+	PostLogoutRedirectURI string
+}
+
+func (c *Endpoints) Defaults() {
+	if c.Login == "" {
+		c.Login = DefaultLoginEndpoint
+	}
+	if c.Callback == "" {
+		c.Callback = DefaultCallbackEndpoint
+	}
+	if c.Logout == "" {
+		c.Logout = DefaultLogoutEndpoint
+	}
+}
 
 type CookieConfig struct {
 	IDTokenName      string
@@ -109,8 +137,7 @@ func (c *Config) apply(ctx context.Context) (oauth2.Config, *oidc.IDTokenVerifie
 	return oauth2Config, verifier, provider.EndSessionURL(), nil
 }
 
-// WebHandler creates a web auth flow handler from config
-func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
+func (c *Config) webHandler(ctx context.Context) (*webHandler, error) {
 	oauth2Config, verifier, endSession, err := c.apply(ctx)
 	if err != nil {
 		return nil, err
@@ -125,8 +152,27 @@ func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
 	}, nil
 }
 
+// WebHandler creates a web auth flow handler from config
+func (c *Config) WebHandler(ctx context.Context) (WebHandler, error) {
+	return c.webHandler(ctx)
+}
+
+// WebMiddleware returns a middleware that manages the configured OIDC endpoints.
+func (c *Config) WebMiddleware(ctx context.Context, endpoints Endpoints) (func(http.Handler) http.Handler, error) {
+	h, err := c.webHandler(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return h.webMiddleware(endpoints), nil
+}
+
 func (c *Config) LazyWebHandler(ctx context.Context) (WebHandler, error) {
 	return &lazyWebHandler{ctx: ctx, config: c}, nil
+}
+
+// LazyWebMiddleware is the lazy version of WebMiddleware.
+func (c *Config) LazyWebMiddleware(ctx context.Context, endpoints Endpoints) (func(http.Handler) http.Handler, error) {
+	return (&lazyWebHandler{ctx: ctx, config: c}).webMiddleware(endpoints), nil
 }
 
 func (c *Config) DeviceHandler(ctx context.Context) (DeviceHandler, error) {

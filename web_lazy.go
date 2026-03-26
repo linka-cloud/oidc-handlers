@@ -27,7 +27,7 @@ import (
 type lazyWebHandler struct {
 	ctx    context.Context
 	config *Config
-	h      WebHandler
+	h      *webHandler
 	mu     sync.RWMutex
 }
 
@@ -85,15 +85,23 @@ func (l *lazyWebHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (l *lazyWebHandler) Middleware(authPath string) func(r http.Handler) http.Handler {
-	h, err := l.handler()
-	if err == nil {
+	return l.middleware(func(h *webHandler) func(http.Handler) http.Handler {
 		return h.Middleware(authPath)
-	}
+	})
+}
+
+func (l *lazyWebHandler) webMiddleware(endpoints Endpoints) func(r http.Handler) http.Handler {
+	return l.middleware(func(h *webHandler) func(http.Handler) http.Handler {
+		return h.webMiddleware(endpoints)
+	})
+}
+
+func (l *lazyWebHandler) middleware(fn func(h *webHandler) func(http.Handler) http.Handler) func(r http.Handler) http.Handler {
 	var (
 		mu   sync.RWMutex
-		mldw http.Handler
+		mldw func(http.Handler) http.Handler
 	)
-	mk := func(next http.Handler) (http.Handler, bool) {
+	mk := func() (func(http.Handler) http.Handler, bool) {
 		mu.RLock()
 		if mldw != nil {
 			mu.RUnlock()
@@ -105,14 +113,14 @@ func (l *lazyWebHandler) Middleware(authPath string) func(r http.Handler) http.H
 			return nil, false
 		}
 		mu.Lock()
-		mldw = h.Middleware(authPath)(next)
+		mldw = fn(h)
 		mu.Unlock()
 		return mldw, true
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if h, ok := mk(next); ok {
-				h.ServeHTTP(w, r)
+			if m, ok := mk(); ok {
+				m(next).ServeHTTP(w, r)
 				return
 			}
 			http.Error(w, "", http.StatusServiceUnavailable)
@@ -136,7 +144,7 @@ func (l *lazyWebHandler) CleanCookies(w http.ResponseWriter) {
 	h.CleanCookies(w)
 }
 
-func (l *lazyWebHandler) handler() (WebHandler, error) {
+func (l *lazyWebHandler) handler() (*webHandler, error) {
 	l.mu.RLock()
 	if l.h != nil {
 		l.mu.RUnlock()
@@ -146,7 +154,7 @@ func (l *lazyWebHandler) handler() (WebHandler, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var err error
-	if l.h, err = l.config.WebHandler(l.ctx); err != nil {
+	if l.h, err = l.config.webHandler(l.ctx); err != nil {
 		logger.C(l.ctx).WithField("oidc", "web").WithError(err).Error("handler init failed")
 	}
 	return l.h, err
